@@ -10,7 +10,7 @@ import HealthKit
 import Observation
 import WidgetKit
 import WatchConnectivity
-import SwiftUI // Needed for AppStorage/UserDefaults access convenience if used directly, but we use UserDefaults standard
+import SwiftUI
 
 @Observable
 class HealthManager: NSObject, WCSessionDelegate {
@@ -19,6 +19,7 @@ class HealthManager: NSObject, WCSessionDelegate {
     var bmr: Double?
     var activeEnergyYesterday: Double = 0
     var activeEnergyToday: Double = 0
+    var activeEnergy7DayAvg: Double = 0
     var dietaryEnergyToday: Double = 0
     
     // Nutrients
@@ -29,8 +30,24 @@ class HealthManager: NSObject, WCSessionDelegate {
     var dietarySugarToday: Double = 0
     var dietarySodiumToday: Double = 0
     
-    var currentWeight: Double?
+    var currentWeight: Double? // 7-Day Average
     var weightTrend: Double?
+    
+    // Advanced Metrics (7-Day Averages)
+    var bodyFat: Double?
+    var vo2Max: Double?
+    
+    // User Stats for Calculations
+    var height: Double? // cm
+    var age: Int?
+    var biologicalSex: HKBiologicalSex = .notSet
+    
+    // Derived Metric: Physical Activity Level (PAL)
+    // Formula: TDEE / BMR = (BMR + ActiveEnergy) / BMR
+    var physicalActivityLevel: Double? {
+        guard let bmr = bmr, bmr > 0, activeEnergy7DayAvg > 0 else { return nil }
+        return (bmr + activeEnergy7DayAvg) / bmr
+    }
     
     // Full Weight History for Trend Tab
     var weightHistory: [Date: Double] = [:]
@@ -45,6 +62,7 @@ class HealthManager: NSObject, WCSessionDelegate {
     var errorMessage: String?
     
     private let authKey = "hasRequestedHealthAuthorization"
+    private var refreshDebounceTask: Task<Void, Never>?
     
     override init() {
         super.init()
@@ -64,14 +82,12 @@ class HealthManager: NSObject, WCSessionDelegate {
         }
         
         // Automatically start observing if we are authorized.
-        // This is critical for background launches.
         if isAuthorized {
             startObserving()
-            // We also fetch data immediately to ensure the app state is fresh
+            // Fire fetch immediately but don't await it in init
             fetchData()
         }
         
-        // Listen for the day changing while the app is running
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(dayChanged),
@@ -102,7 +118,10 @@ class HealthManager: NSObject, WCSessionDelegate {
             HKObjectType.quantityType(forIdentifier: .dietaryFatTotal)!,
             HKObjectType.quantityType(forIdentifier: .dietaryFatSaturated)!,
             HKObjectType.quantityType(forIdentifier: .dietarySugar)!,
-            HKObjectType.quantityType(forIdentifier: .dietarySodium)!
+            HKObjectType.quantityType(forIdentifier: .dietarySodium)!,
+            // New Metrics
+            HKObjectType.quantityType(forIdentifier: .bodyFatPercentage)!,
+            HKObjectType.quantityType(forIdentifier: .vo2Max)!
         ]
         
         let typesToShare: Set<HKSampleType> = [
@@ -118,9 +137,8 @@ class HealthManager: NSObject, WCSessionDelegate {
         
         do {
             try await healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead)
-            await updatePreferredUnits() // Fetch units after auth
+            await updatePreferredUnits()
             
-            // Persist that we have requested auth so we can start observing on next launch
             UserDefaults.standard.set(true, forKey: authKey)
             
             await MainActor.run {
@@ -146,15 +164,20 @@ class HealthManager: NSObject, WCSessionDelegate {
         }
     }
     
-    // Fire-and-forget fetch for UI
     func fetchData() {
-        Task {
-            await refreshData()
+        // Debounce to prevent UI freezing on rapid updates
+        refreshDebounceTask?.cancel()
+        refreshDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+            if !Task.isCancelled {
+                await refreshData()
+            }
         }
     }
     
-    // Awaitable fetch for background tasks
     func refreshData() async {
+        // We use detached tasks inside these methods where appropriate to keep the Main Thread free
+        // The methods below will internally switch to MainActor only when assigning data.
         await fetchBMRData()
         await fetchActiveEnergy()
         await fetchNutrientsToday()
@@ -166,18 +189,8 @@ class HealthManager: NSObject, WCSessionDelegate {
         }
     }
     
-    // MARK: - Writing Data (Inputs are assumed kcal for calculation, then converted)
-    func logBreakfast(
-        totalKcal: Double,
-        fat: Double,
-        satFat: Double,
-        carbs: Double,
-        sugar: Double,
-        protein: Double,
-        fiber: Double,
-        sodium: Double,
-        date: Date = Date()
-    ) async {
+    // MARK: - Writing Data
+    func logBreakfast(totalKcal: Double, fat: Double, satFat: Double, carbs: Double, sugar: Double, protein: Double, fiber: Double, sodium: Double, date: Date = Date()) async {
         guard isAuthorized else { return }
         
         func createSample(type: HKQuantityTypeIdentifier, value: Double, unit: HKUnit) -> HKQuantitySample {
@@ -187,11 +200,6 @@ class HealthManager: NSObject, WCSessionDelegate {
         }
         
         var samples: [HKObject] = []
-        
-        // We use the preferred unit here so HK doesn't double convert if not needed,
-        // BUT our input 'totalKcal' from UI is likely still kcal if we haven't updated the input fields yet.
-        // For now, let's assume the input function passes kcal, and we save as kcal.
-        // HealthKit handles unit conversion internally when reading back.
         samples.append(createSample(type: .dietaryEnergyConsumed, value: totalKcal, unit: .kilocalorie()))
         
         if fat > 0 { samples.append(createSample(type: .dietaryFatTotal, value: fat, unit: .gram())) }
@@ -204,6 +212,7 @@ class HealthManager: NSObject, WCSessionDelegate {
         
         do {
             try await healthStore.save(samples)
+            // Trigger an immediate UI update
             await MainActor.run { self.fetchData() }
         } catch {
             print("Error saving breakfast: \(error.localizedDescription)")
@@ -216,27 +225,16 @@ class HealthManager: NSObject, WCSessionDelegate {
         let defaults = UserDefaults.standard
         let deficit = defaults.object(forKey: "caloricDeficit") as? Double ?? 500.0
         let useActiveEnergyToday = defaults.bool(forKey: "useActiveEnergyToday")
-        
-        // Auto Deficit Logic Check
         let autoDeficitEnabled = defaults.bool(forKey: "autoDeficitEnabled")
         let isInDeficitMode = defaults.bool(forKey: "isCurrentlyInDeficitMode")
         
-        let effectiveDeficit: Double
-        if autoDeficitEnabled {
-            effectiveDeficit = isInDeficitMode ? deficit : 0
-        } else {
-            effectiveDeficit = deficit
-        }
+        let effectiveDeficit = autoDeficitEnabled ? (isInDeficitMode ? deficit : 0) : deficit
         
         guard let bmr = self.bmr else { return }
         
-        // Internal calculations still in kcal for consistency
         let activeEnergy = useActiveEnergyToday ? self.activeEnergyToday : self.activeEnergyYesterday
         let tdee = bmr + activeEnergy
         let dailyGoal = tdee - effectiveDeficit
-        
-        // Convert to preferred unit for display if needed, but Widget usually expects kcal
-        // For simplicity, we keep the Widget in kcal as it is "Calorie Budget"
         let remaining = dailyGoal - self.dietaryEnergyToday
         
         let kcalProgress = min(self.dietaryEnergyToday / (dailyGoal > 0 ? dailyGoal : 1), 1.0)
@@ -253,22 +251,14 @@ class HealthManager: NSObject, WCSessionDelegate {
         sharedDefaults?.set(fiberProgress, forKey: "fiberProgress")
         sharedDefaults?.set(!self.weightMissingToday, forKey: "weighedInToday")
         
-        // Save weight and trend for display in Widget
         if let currentWeight = self.currentWeight {
             sharedDefaults?.set(currentWeight, forKey: "currentWeight")
-        } else {
-            sharedDefaults?.removeObject(forKey: "currentWeight")
         }
-        
         if let weightTrend = self.weightTrend {
             sharedDefaults?.set(weightTrend, forKey: "weightTrend")
-        } else {
-            sharedDefaults?.removeObject(forKey: "weightTrend")
         }
         
-        // Save date to allow widget to invalidate old data
         sharedDefaults?.set(Date(), forKey: "lastUpdatedDate")
-        
         WidgetCenter.shared.reloadAllTimelines()
         
         if WCSession.default.isReachable {
@@ -278,14 +268,8 @@ class HealthManager: NSObject, WCSessionDelegate {
                 "weighedInToday": !self.weightMissingToday,
                 "timestamp": Date().timeIntervalSince1970
             ]
-            
-            if let currentWeight = self.currentWeight {
-                context["currentWeight"] = currentWeight
-            }
-            if let weightTrend = self.weightTrend {
-                context["weightTrend"] = weightTrend
-            }
-            
+            if let cw = self.currentWeight { context["currentWeight"] = cw }
+            if let wt = self.weightTrend { context["weightTrend"] = wt }
             try? WCSession.default.updateApplicationContext(context)
         }
     }
@@ -294,131 +278,165 @@ class HealthManager: NSObject, WCSessionDelegate {
     private func fetchBMRData() async {
         do {
             let birthDateComponents = try healthStore.dateOfBirthComponents()
-            let biologicalSex = try healthStore.biologicalSex()
+            let biologicalSexObj = try healthStore.biologicalSex()
+            let biologicalSex = biologicalSexObj.biologicalSex
             
             guard let birthDate = birthDateComponents.date else { return }
             let ageComponents = Calendar.current.dateComponents([.year], from: birthDate, to: Date())
-            let age = Double(ageComponents.year ?? 0)
+            let age = ageComponents.year ?? 0
             
             let heightType = HKQuantityType.quantityType(forIdentifier: .height)!
             let heightSamples = try await fetchSamples(for: heightType, limit: 1)
-            guard let heightSample = heightSamples.first else { return }
-            let heightCm = heightSample.quantity.doubleValue(for: .meter()) * 100
+            let heightCm = (heightSamples.first?.quantity.doubleValue(for: .meter()) ?? 0) * 100
             
+            // --- WEIGHT (7-Day Average) ---
             let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass)!
-            
-            // Range calculations
             let calendar = Calendar.current
             let startOfToday = calendar.startOfDay(for: Date())
             
-            // Last 14 days: Day 0 (Today) to Day -13
-            let startOfRecent = calendar.date(byAdding: .day, value: -13, to: startOfToday)!
-            // Previous 14 days: Day -14 to Day -27
-            let startOfPrevious = calendar.date(byAdding: .day, value: -27, to: startOfToday)!
+            // Last 7 days: Day 0 (Today) to Day -6
+            let startOfRecent = calendar.date(byAdding: .day, value: -6, to: startOfToday)!
+            // Previous 7 days: Day -7 to Day -13
+            let startOfPrevious = calendar.date(byAdding: .day, value: -13, to: startOfToday)!
             
-            // Fetch all potentially relevant samples (last 28 days)
             let predicate = HKQuery.predicateForSamples(withStart: startOfPrevious, end: Date(), options: .strictStartDate)
             let recentWeights = try await fetchSamples(for: weightType, predicate: predicate)
             
-            var recentSum: Double = 0
-            var recentCount: Int = 0
-            var previousSum: Double = 0
-            var previousCount: Int = 0
+            // --- Body Fat (7 Day Avg) ---
+            let bodyFatType = HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage)!
+            let bfPredicate = HKQuery.predicateForSamples(withStart: startOfRecent, end: Date(), options: .strictStartDate)
+            let bfSamples = try await fetchSamples(for: bodyFatType, predicate: bfPredicate)
+
+            // --- VO2 Max (7 Day Avg) ---
+            let vo2Type = HKQuantityType.quantityType(forIdentifier: .vo2Max)!
+            let vo2Predicate = HKQuery.predicateForSamples(withStart: startOfRecent, end: Date(), options: .strictStartDate)
+            let vo2Samples = try await fetchSamples(for: vo2Type, predicate: vo2Predicate)
             
-            for sample in recentWeights {
-                let weightVal = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
-                if sample.startDate >= startOfRecent {
-                    recentSum += weightVal
-                    recentCount += 1
-                } else {
-                    previousSum += weightVal
-                    previousCount += 1
-                }
-            }
-            
-            var displayWeight: Double?
-            var trend: Double?
-            var weightForBMR: Double = 0
-            
-            // Calculate Current (Recent) Average
-            if recentCount > 0 {
-                let avg = recentSum / Double(recentCount)
-                displayWeight = avg
-                weightForBMR = avg
-            }
-            
-            // Calculate Trend
-            if recentCount > 0 && previousCount > 0 {
-                let currentAvg = recentSum / Double(recentCount)
-                let previousAvg = previousSum / Double(previousCount)
-                trend = currentAvg - previousAvg
-            }
-            
-            // Fallback for BMR if no recent data (displayWeight will remain nil)
-            if weightForBMR == 0 {
-                // If we have previous period data but not recent, use previous for BMR
-                if previousCount > 0 {
-                    weightForBMR = previousSum / Double(previousCount)
-                } else {
-                    // Fallback to oldest known weight if no data in last 28 days
-                    let allWeights = try await fetchSamples(for: weightType, limit: 1, sortAscending: true)
-                    if let oldest = allWeights.first {
-                        weightForBMR = oldest.quantity.doubleValue(for: .gramUnit(with: .kilo))
+            // ⚠️ CRITICAL: Move Math to background thread (Detached Task)
+            // This prevents UI stuttering while iterating over samples
+            let result = await Task.detached { () -> (Double?, Double?, Double?, Double?, Double?) in
+                var recentSum: Double = 0
+                var recentCount: Int = 0
+                var previousSum: Double = 0
+                var previousCount: Int = 0
+                
+                for sample in recentWeights {
+                    let weightVal = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
+                    if sample.startDate >= startOfRecent {
+                        recentSum += weightVal
+                        recentCount += 1
+                    } else {
+                        previousSum += weightVal
+                        previousCount += 1
                     }
                 }
+                
+                var displayWeight: Double?
+                var trend: Double?
+                var weightForBMR: Double = 0
+                
+                if recentCount > 0 {
+                    let avg = recentSum / Double(recentCount)
+                    displayWeight = avg
+                    weightForBMR = avg
+                }
+                
+                if recentCount > 0 && previousCount > 0 {
+                    let currentAvg = recentSum / Double(recentCount)
+                    let previousAvg = previousSum / Double(previousCount)
+                    trend = currentAvg - previousAvg
+                }
+                
+                // Fallback for BMR calculation if no recent data
+                if weightForBMR == 0 {
+                    if previousCount > 0 {
+                        weightForBMR = previousSum / Double(previousCount)
+                    } 
+                }
+                
+                let avgBodyFat: Double? = bfSamples.isEmpty ? nil : (bfSamples.reduce(0) { $0 + $1.quantity.doubleValue(for: .percent()) } / Double(bfSamples.count))
+
+                // ⚠️ FIX: Construct Unit Programmatically to avoid Crash
+                let ml = HKUnit.literUnit(with: .milli)
+                let kg = HKUnit.gramUnit(with: .kilo)
+                let min = HKUnit.minute()
+                let vo2Unit = ml.unitDivided(by: kg.unitMultiplied(by: min))
+                
+                let avgVo2: Double? = vo2Samples.isEmpty ? nil : (vo2Samples.reduce(0) { $0 + $1.quantity.doubleValue(for: vo2Unit) } / Double(vo2Samples.count))
+                
+                return (displayWeight, trend, weightForBMR, avgBodyFat, avgVo2)
+            }.value
+            
+            let displayWeight = result.0
+            let trend = result.1
+            var weightForBMR = result.2 ?? 0
+            let avgBodyFat = result.3
+            let avgVo2 = result.4
+            
+            // Last ditch fallback for BMR if we still have 0 weight (no data in last 14 days)
+            if weightForBMR == 0 {
+                let allWeights = try await fetchSamples(for: weightType, limit: 1, sortAscending: false)
+                if let newest = allWeights.first {
+                    weightForBMR = newest.quantity.doubleValue(for: .gramUnit(with: .kilo))
+                }
             }
             
-            // Ensure we have a valid weight for BMR calculation before proceeding
-            guard weightForBMR > 0 else { return }
+            guard weightForBMR > 0 && heightCm > 0 else { return }
             
-            // Mifflin-St Jeor Equation (returns kcal/day)
-            let s = (10 * weightForBMR) + (6.25 * heightCm) - (5 * age)
-            
-            // Calculate final value as a 'let' to avoid Swift 6 concurrency capture errors
+            // Mifflin-St Jeor Equation
+            let s = (10 * weightForBMR) + (6.25 * heightCm) - (5 * Double(age))
             let finalBMR: Double = {
-                switch biologicalSex.biologicalSex {
+                switch biologicalSex {
                 case .male: return s + 5
                 case .female: return s - 161
                 default: return s
                 }
             }()
             
-            // Capture these immutable values for the MainActor closure to satisfy Swift 6
-            let finalDisplayWeight = displayWeight
-            let finalTrend = trend
+            // Capture for Actor
+            let finalAge = age
+            let finalHeight = heightCm
             
             await MainActor.run {
                 self.bmr = finalBMR
-                self.currentWeight = finalDisplayWeight
-                self.weightTrend = finalTrend
+                self.currentWeight = displayWeight
+                self.weightTrend = trend
+                
+                self.height = finalHeight
+                self.age = finalAge
+                self.biologicalSex = biologicalSex
+                self.bodyFat = avgBodyFat
+                self.vo2Max = avgVo2
             }
         } catch {
             print("Error fetching BMR data: \(error)")
         }
     }
     
-    // Fetch full history for the trend graph
     private func fetchWeightHistory() async {
         let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass)!
-        // Fetch all data (no start date limit)
-        let predicate = HKQuery.predicateForSamples(withStart: nil, end: Date(), options: .strictStartDate)
+        // SAFETY: Limit history to year 2000+
+        let limitDate = Calendar.current.date(from: DateComponents(year: 2000, month: 1, day: 1))
+        let predicate = HKQuery.predicateForSamples(withStart: limitDate, end: Date(), options: .strictStartDate)
         
         do {
+            // Fetch is async
             let samples = try await fetchSamples(for: weightType, predicate: predicate, limit: HKObjectQueryNoLimit, sortAscending: true)
             
-            var history: [Date: Double] = [:]
-            let calendar = Calendar.current
+            // Process on Background Thread
+            let history = await Task.detached {
+                var dict: [Date: Double] = [:]
+                let calendar = Calendar.current
+                for sample in samples {
+                    let date = calendar.startOfDay(for: sample.startDate)
+                    let weight = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
+                    dict[date] = weight
+                }
+                return dict
+            }.value
             
-            for sample in samples {
-                let date = calendar.startOfDay(for: sample.startDate)
-                let weight = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
-                // Duplicate handling: latest wins (iteration order is ascending start date)
-                history[date] = weight
-            }
-            
-            let finalHistory = history
             await MainActor.run {
-                self.weightHistory = finalHistory
+                self.weightHistory = history
             }
         } catch {
             print("Error fetching weight history: \(error)")
@@ -428,23 +446,41 @@ class HealthManager: NSObject, WCSessionDelegate {
     private func fetchActiveEnergy() async {
         let type = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!
         let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: Date())!
-        let startOfYesterday = calendar.startOfDay(for: yesterday)
-        let endOfYesterday = startOfDay
+        let now = Date()
+        let startOfDay = calendar.startOfDay(for: now)
         
-        let predicateYesterday = HKQuery.predicateForSamples(withStart: startOfYesterday, end: endOfYesterday, options: .strictStartDate)
-        let samplesYesterday = try? await fetchSamples(for: type, predicate: predicateYesterday)
-        // Store internally as kcal for math consistency
-        let totalYesterday = samplesYesterday?.reduce(0) { $0 + $1.quantity.doubleValue(for: .kilocalorie()) } ?? 0
+        // Ranges
+        let startOfYesterday = calendar.date(byAdding: .day, value: -1, to: startOfDay)!
+        // 7-day Average: Uses the last 7 COMPLETE days (Yesterday through Yesterday-6)
+        // startOf7Days = Today - 7
+        // endOf7Days = Today (exclusive) -> so it includes [Today-7...Today-1]
+        let startOf7Days = calendar.date(byAdding: .day, value: -7, to: startOfDay)!
+        let endOf7Days = startOfDay // This ensures TODAY is excluded from the average
         
-        let predicateToday = HKQuery.predicateForSamples(withStart: startOfDay, end: Date(), options: .strictStartDate)
-        let samplesToday = try? await fetchSamples(for: type, predicate: predicateToday)
-        let totalToday = samplesToday?.reduce(0) { $0 + $1.quantity.doubleValue(for: .kilocalorie()) } ?? 0
+        let predicateYesterday = HKQuery.predicateForSamples(withStart: startOfYesterday, end: startOfDay, options: .strictStartDate)
+        let predicateToday = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
+        let predicate7Days = HKQuery.predicateForSamples(withStart: startOf7Days, end: endOf7Days, options: .strictStartDate)
+        
+        // Parallel Fetch
+        async let samplesYesterday = (try? await fetchSamples(for: type, predicate: predicateYesterday)) ?? []
+        async let samplesToday = (try? await fetchSamples(for: type, predicate: predicateToday)) ?? []
+        async let samples7Days = (try? await fetchSamples(for: type, predicate: predicate7Days)) ?? []
+        
+        let (sY, sT, s7) = await (samplesYesterday, samplesToday, samples7Days)
+        
+        // Calculate on background
+        let result = await Task.detached {
+            let y = sY.reduce(0) { $0 + $1.quantity.doubleValue(for: .kilocalorie()) }
+            let t = sT.reduce(0) { $0 + $1.quantity.doubleValue(for: .kilocalorie()) }
+            // 7-day average: Sum / 7
+            let avg = s7.reduce(0) { $0 + $1.quantity.doubleValue(for: .kilocalorie()) } / 7.0
+            return (y, t, avg)
+        }.value
         
         await MainActor.run {
-            self.activeEnergyYesterday = totalYesterday
-            self.activeEnergyToday = totalToday
+            self.activeEnergyYesterday = result.0
+            self.activeEnergyToday = result.1
+            self.activeEnergy7DayAvg = result.2
         }
     }
     
@@ -453,29 +489,37 @@ class HealthManager: NSObject, WCSessionDelegate {
         let startOfDay = calendar.startOfDay(for: Date())
         let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: Date(), options: .strictStartDate)
         
-        func sum(identifier: HKQuantityTypeIdentifier, unit: HKUnit) async -> Double {
-            guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else { return 0 }
-            guard let samples = try? await fetchSamples(for: type, predicate: predicate) else { return 0 }
-            return samples.reduce(0) { $0 + $1.quantity.doubleValue(for: unit) }
-        }
+        // Parallel Fetching
+        async let samplesEnergy = (try? await fetchSamples(for: HKQuantityType.quantityType(forIdentifier: .dietaryEnergyConsumed)!, predicate: predicate)) ?? []
+        async let samplesProtein = (try? await fetchSamples(for: HKQuantityType.quantityType(forIdentifier: .dietaryProtein)!, predicate: predicate)) ?? []
+        async let samplesFiber = (try? await fetchSamples(for: HKQuantityType.quantityType(forIdentifier: .dietaryFiber)!, predicate: predicate)) ?? []
+        async let samplesFat = (try? await fetchSamples(for: HKQuantityType.quantityType(forIdentifier: .dietaryFatTotal)!, predicate: predicate)) ?? []
+        async let samplesSatFat = (try? await fetchSamples(for: HKQuantityType.quantityType(forIdentifier: .dietaryFatSaturated)!, predicate: predicate)) ?? []
+        async let samplesSugar = (try? await fetchSamples(for: HKQuantityType.quantityType(forIdentifier: .dietarySugar)!, predicate: predicate)) ?? []
+        async let samplesSodium = (try? await fetchSamples(for: HKQuantityType.quantityType(forIdentifier: .dietarySodium)!, predicate: predicate)) ?? []
         
-        // Fetch energy in KCAL always for internal consistency
-        let energy = await sum(identifier: .dietaryEnergyConsumed, unit: .kilocalorie())
-        let protein = await sum(identifier: .dietaryProtein, unit: .gram())
-        let fiber = await sum(identifier: .dietaryFiber, unit: .gram())
-        let fatTotal = await sum(identifier: .dietaryFatTotal, unit: .gram())
-        let fatSat = await sum(identifier: .dietaryFatSaturated, unit: .gram())
-        let sugar = await sum(identifier: .dietarySugar, unit: .gram())
-        let sodium = await sum(identifier: .dietarySodium, unit: .gram())
+        let (sEnergy, sProtein, sFiber, sFat, sSatFat, sSugar, sSodium) = await (samplesEnergy, samplesProtein, samplesFiber, samplesFat, samplesSatFat, samplesSugar, samplesSodium)
+        
+        // Background Calculation
+        let result = await Task.detached {
+            let e = sEnergy.reduce(0) { $0 + $1.quantity.doubleValue(for: .kilocalorie()) }
+            let p = sProtein.reduce(0) { $0 + $1.quantity.doubleValue(for: .gram()) }
+            let fi = sFiber.reduce(0) { $0 + $1.quantity.doubleValue(for: .gram()) }
+            let f = sFat.reduce(0) { $0 + $1.quantity.doubleValue(for: .gram()) }
+            let sf = sSatFat.reduce(0) { $0 + $1.quantity.doubleValue(for: .gram()) }
+            let su = sSugar.reduce(0) { $0 + $1.quantity.doubleValue(for: .gram()) }
+            let so = sSodium.reduce(0) { $0 + $1.quantity.doubleValue(for: .gram()) }
+            return (e, p, fi, f, sf, su, so)
+        }.value
         
         await MainActor.run {
-            self.dietaryEnergyToday = energy
-            self.dietaryProteinToday = protein
-            self.dietaryFiberToday = fiber
-            self.dietaryFatTotalToday = fatTotal
-            self.dietaryFatSaturatedToday = fatSat
-            self.dietarySugarToday = sugar
-            self.dietarySodiumToday = sodium
+            self.dietaryEnergyToday = result.0
+            self.dietaryProteinToday = result.1
+            self.dietaryFiberToday = result.2
+            self.dietaryFatTotalToday = result.3
+            self.dietaryFatSaturatedToday = result.4
+            self.dietarySugarToday = result.5
+            self.dietarySodiumToday = result.6
         }
     }
     
@@ -490,25 +534,13 @@ class HealthManager: NSObject, WCSessionDelegate {
         
         await MainActor.run {
             self.weightMissingToday = samples?.isEmpty ?? true
-            
-            // Update Auto Deficit logic if user has enabled it
-            // Logic:
-            // - If weight >= UpperBound -> Deficit ON
-            // - If weight <= LowerBound -> Deficit OFF
-            // - Else -> Maintain current state
             let defaults = UserDefaults.standard
             if defaults.bool(forKey: "autoDeficitEnabled"), let weight = todaysWeight {
                 let upper = defaults.double(forKey: "autoDeficitUpperBound")
                 let lower = defaults.double(forKey: "autoDeficitLowerBound")
-                
-                // Only act if bounds are valid
                 if upper > lower && lower > 0 {
-                    if weight >= upper {
-                        defaults.set(true, forKey: "isCurrentlyInDeficitMode")
-                    } else if weight <= lower {
-                        defaults.set(false, forKey: "isCurrentlyInDeficitMode")
-                    }
-                    // If in between, do nothing (hysteresis)
+                    if weight >= upper { defaults.set(true, forKey: "isCurrentlyInDeficitMode") }
+                    else if weight <= lower { defaults.set(false, forKey: "isCurrentlyInDeficitMode") }
                 }
             }
         }
@@ -545,32 +577,16 @@ class HealthManager: NSObject, WCSessionDelegate {
         ]
         
         for type in types {
-            // Using HKObserverQuery with completion handler is required for background delivery
             let query = HKObserverQuery(sampleType: type as! HKSampleType, predicate: nil) { [weak self] query, completionHandler, error in
                 guard let self = self, error == nil else {
-                    // Even if error or self is nil, we should call completion if possible,
-                    // but if self is nil we can't do much.
-                    // If error exists, we still need to signal we are done handling this event.
                     completionHandler()
                     return
                 }
-                
-                // Perform the update
-                Task {
-                    await self.refreshData()
-                    // Signal HealthKit that we are done
-                    completionHandler()
-                }
+                self.fetchData()
+                completionHandler()
             }
-            
             healthStore.execute(query)
-            
-            // Enable background delivery
-            healthStore.enableBackgroundDelivery(for: type as! HKSampleType, frequency: .immediate) { success, error in
-                if let error = error {
-                    print("Failed to enable background delivery for \(type.identifier): \(error.localizedDescription)")
-                }
-            }
+            healthStore.enableBackgroundDelivery(for: type as! HKSampleType, frequency: .immediate) { _, _ in }
         }
     }
 }

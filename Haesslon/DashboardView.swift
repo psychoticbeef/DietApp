@@ -34,6 +34,11 @@ struct DashboardView: View {
     @AppStorage("autoDeficitEnabled") private var autoDeficitEnabled: Bool = false
     @AppStorage("isCurrentlyInDeficitMode") private var isCurrentlyInDeficitMode: Bool = false
     
+    let columns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+    
     var body: some View {
         VStack(spacing: 20) {
             if !healthManager.isAuthorized {
@@ -48,6 +53,8 @@ struct DashboardView: View {
                     }
                 }
             } else {
+                // Recreating the ScrollView using .id forces a reset to the top.
+                // This is the most reliable way to jump to top on state change.
                 ScrollView {
                     VStack(spacing: isEnteringFood ? 12 : 24) {
                         mainStatusCard(preview: previewSnapshot, isCompact: isEnteringFood)
@@ -76,6 +83,7 @@ struct DashboardView: View {
                     .padding()
                     .padding(.bottom, isEnteringFood ? 300 : 0)
                 }
+                .id(isEnteringFood) // ⚡️ FORCE SCROLL TO TOP ON CHANGE
                 .refreshable { healthManager.fetchData() }
             }
         }
@@ -287,35 +295,77 @@ struct DashboardView: View {
                 )
             }
             
+            // Metrics Section (Grid)
             if let weight = healthManager.currentWeight {
                 Divider()
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Weight (14d Avg)")
+                
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("Body Composition (7d Avg)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        // 1. Weight
+                        MetricCard(
+                            label: "Weight",
+                            value: String(format: "%.1f", weight),
+                            unit: "kg",
+                            category: "",
+                            color: .primary,
+                            trend: healthManager.weightTrend
+                        )
                         
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(String(format: "%.1f", weight))
-                                .font(.title3)
-                                .bold()
-                            
-                            Text(" kg")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            
-                            if let trend = healthManager.weightTrend {
-                                HStack(spacing: 2) {
-                                    Image(systemName: trend > 0 ? "arrow.up" : "arrow.down")
-                                    Text(String(format: "%.1f", abs(trend)))
-                                }
-                                .font(.caption)
-                                .fontWeight(.bold)
-                                .foregroundStyle(trend > 0 ? .red : .green)
-                            }
+                        // 2. BMI
+                        if let height = healthManager.height {
+                            let (cat, col) = HealthEvaluator.evaluateBMI(weightKg: weight, heightCm: height)
+                            MetricCard(
+                                label: "BMI",
+                                value: String(format: "%.1f", weight / pow(height/100, 2)),
+                                unit: "",
+                                category: cat,
+                                color: col
+                            )
+                        }
+                        
+                        // 3. Body Fat
+                        if let bf = healthManager.bodyFat, let age = healthManager.age {
+                            let (cat, col) = HealthEvaluator.evaluateBodyFat(percent: bf, age: age, sex: healthManager.biologicalSex)
+                            MetricCard(
+                                label: "Body Fat",
+                                value: String(format: "%.1f", bf * 100),
+                                unit: "%",
+                                category: cat,
+                                color: col
+                            )
+                        }
+                        
+                        // 4. VO2 Max
+                        if let vo2 = healthManager.vo2Max, let age = healthManager.age {
+                            let (cat, col) = HealthEvaluator.evaluateVO2Max(value: vo2, age: age, sex: healthManager.biologicalSex)
+                            MetricCard(
+                                label: "VO2 Max",
+                                value: String(format: "%.1f", vo2),
+                                unit: "ml/kg",
+                                category: cat,
+                                color: col
+                            )
+                        }
+                        
+                        // 5. PA Level
+                        if let pal = healthManager.physicalActivityLevel {
+                            let (cat, col) = HealthEvaluator.evaluatePAL(value: pal)
+                            MetricCard(
+                                label: "PA Level",
+                                value: String(format: "%.2f", pal),
+                                unit: "",
+                                category: cat,
+                                color: col
+                            )
                         }
                     }
-                    Spacer()
                 }
             }
         }

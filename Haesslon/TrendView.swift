@@ -13,11 +13,15 @@ struct TrendView: View {
     @State private var scrollPosition = Date() // ChartScrollPosition represents LEADING edge
     @State private var initialVisibleDays: Double? = nil // For gesture calculation
     @State private var initialScrollDate: Date? = nil // For gesture anchoring
+    @State private var hasPerformedInitialScroll: Bool = false
     
     // Y-Axis State
     @State private var yAxisDomain: ClosedRange<Double> = 0...100
     @State private var isInteracting: Bool = false
     @State private var scrollDebounceTask: Task<Void, Never>? = nil
+    
+    // Calculation Task
+    @State private var calculationTask: Task<Void, Never>? = nil
     
     var body: some View {
         NavigationStack {
@@ -160,7 +164,6 @@ struct TrendView: View {
             }
             .onAppear {
                 calculate()
-                scrollToEnd()
             }
         }
     }
@@ -269,9 +272,9 @@ struct TrendView: View {
         scrollPosition = leadingDate
     }
     
-    private func updateYDomain() {
-        let visibleStart = scrollPosition
-        let visibleEnd = scrollPosition.addingTimeInterval(visibleDays * 86400)
+    private func updateYDomain(targetScrollPosition: Date? = nil) {
+        let visibleStart = targetScrollPosition ?? scrollPosition
+        let visibleEnd = visibleStart.addingTimeInterval(visibleDays * 86400)
         
         let visibleData = trendData.filter { $0.date >= visibleStart && $0.date <= visibleEnd }
         
@@ -295,12 +298,55 @@ struct TrendView: View {
     
     // MARK: - Calculation
     private func calculate() {
-        let engine = TrendEngine()
-        let result = engine.calculateTrend(from: healthManager.weightHistory)
-        self.trendData = result
-        self.stats = engine.getStats(from: result)
+        let history = healthManager.weightHistory
         
-        updateYDomain()
+        calculationTask?.cancel()
+        calculationTask = Task {
+            // Run expensive calculation on background thread
+            let (newTrendData, newStats) = await Task.detached(priority: .userInitiated) {
+                // Updated to use static methods on TrendEngine enum
+                // This avoids MainActor isolated initializer issues
+                let result = TrendEngine.calculateTrend(from: history)
+                let stats = TrendEngine.getStats(from: result)
+                return (result, stats)
+            }.value
+            
+            // Check for cancellation before updating UI
+            if !Task.isCancelled {
+                // 1. Update Data First
+                await MainActor.run {
+                    self.trendData = newTrendData
+                    self.stats = newStats
+                }
+                
+                // 2. Wait a tick to allow SwiftUI to acknowledge new data/domain
+                try? await Task.sleep(for: .milliseconds(50))
+                if Task.isCancelled { return }
+                
+                // 3. Update Scroll Position and Y-Axis
+                await MainActor.run {
+                    if !newTrendData.isEmpty {
+                        // Logic to handle initial scroll or updates
+                        if !hasPerformedInitialScroll {
+                            // Calculate where we want to go
+                            if let lastDate = newTrendData.last?.date {
+                                let leadingDate = lastDate.addingTimeInterval(-(visibleDays * 86400))
+                                
+                                // Set state
+                                self.scrollPosition = leadingDate
+                                self.hasPerformedInitialScroll = true
+                                
+                                // Update Y-Axis immediately for this new position
+                                self.updateYDomain(targetScrollPosition: leadingDate)
+                            }
+                        } else {
+                            // Normal update
+                            self.updateYDomain()
+                        }
+                    }
+                }
+            }
+        }
     }
     
     private var xAxisDomain: ClosedRange<Date> {

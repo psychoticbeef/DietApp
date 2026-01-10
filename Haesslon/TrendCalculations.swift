@@ -1,7 +1,8 @@
 import Foundation
 
 // MARK: - Data Models
-struct DailyTrendData: Identifiable {
+
+struct DailyTrendData: Identifiable, Sendable {
     let id = UUID()
     let date: Date
     let rawWeight: Double? // Nil if interpolated or missing
@@ -12,21 +13,26 @@ struct DailyTrendData: Identifiable {
     var isInterpolated: Bool { rawWeight == nil && !isProjected }
 }
 
-struct TrendStats {
+struct TrendStats: Sendable {
     let currentTrend: Double
     let weeklyChange: Double // Delta over 7 days
     let dailyCaloricImbalance: Double // kcal surplus/deficit
 }
 
 // MARK: - Engine
-struct TrendEngine {
-    private let k: Double = 0.1
-    private let constantKgKcal: Double = 7700.0 // 1 kg = 7700 kcal
+
+// This enum performs pure calculations and functions as a namespace.
+// Marked as Sendable (implicitly true for enums) to be safe.
+enum TrendEngine: Sendable {
     
     /// Processes raw HealthKit weight samples into a continuous trend line.
     /// - Parameter weightHistory: Dictionary of Date -> Weight (in kg)
     /// - Returns: Sorted array of DailyTrendData
-    func calculateTrend(from weightHistory: [Date: Double]) -> [DailyTrendData] {
+    nonisolated static func calculateTrend(from weightHistory: [Date: Double]) -> [DailyTrendData] {
+        // Defined locally to avoid MainActor isolation inference on global constants
+        let smoothingFactorK: Double = 0.1
+        let constantKgKcal: Double = 7700.0 // 1 kg = 7700 kcal
+        
         guard !weightHistory.isEmpty else { return [] }
         
         // 1. Sort dates
@@ -44,7 +50,11 @@ struct TrendEngine {
         var d = startDate
         while d <= targetEndDate {
             allDays.append(d)
-            d = calendar.date(byAdding: .day, value: 1, to: d)!
+            if let next = calendar.date(byAdding: .day, value: 1, to: d) {
+                d = next
+            } else {
+                break
+            }
         }
         
         // Pre-fill weights with interpolation
@@ -70,6 +80,7 @@ struct TrendEngine {
                 }
                 
                 if let nextIndex = nextKnownIndex, 
+                   i > 0,
                    let startWeight = filledWeights[allDays[i-1]], 
                    let endWeight = weightHistory[allDays[nextIndex]] {
                     
@@ -105,7 +116,7 @@ struct TrendEngine {
             
             let trend: Double
             if let prev = previousTrend {
-                trend = prev + k * (dailyWeight - prev)
+                trend = prev + smoothingFactorK * (dailyWeight - prev)
             } else {
                 trend = dailyWeight
             }
@@ -145,24 +156,28 @@ struct TrendEngine {
             var projectionTrend = lastEntry.trendWeight
             
             for _ in 1...14 {
-                projectionDate = calendar.date(byAdding: .day, value: 1, to: projectionDate)!
-                projectionTrend += dailyRateKg
-                
-                let entry = DailyTrendData(
-                    date: projectionDate,
-                    rawWeight: nil,
-                    trendWeight: projectionTrend,
-                    caloricImbalance: lastEntry.caloricImbalance, // Assume constant rate
-                    isProjected: true
-                )
-                result.append(entry)
+                if let next = calendar.date(byAdding: .day, value: 1, to: projectionDate) {
+                    projectionDate = next
+                    projectionTrend += dailyRateKg
+                    
+                    let entry = DailyTrendData(
+                        date: projectionDate,
+                        rawWeight: nil,
+                        trendWeight: projectionTrend,
+                        caloricImbalance: lastEntry.caloricImbalance, // Assume constant rate
+                        isProjected: true
+                    )
+                    result.append(entry)
+                }
             }
         }
         
         return result
     }
     
-    func getStats(from data: [DailyTrendData]) -> TrendStats? {
+    nonisolated static func getStats(from data: [DailyTrendData]) -> TrendStats? {
+        let constantKgKcal: Double = 7700.0 // 1 kg = 7700 kcal
+        
         // Find last REAL data point (not projected)
         guard let lastReal = data.last(where: { !$0.isProjected }) else { return nil }
         
