@@ -77,6 +77,11 @@ struct ContentView: View {
             .tabItem { Label("Dashboard", systemImage: "chart.pie.fill") }
             
             NavigationStack {
+                TrendView()
+            }
+            .tabItem { Label("Trend", systemImage: "chart.xyaxis.line") }
+            
+            NavigationStack {
                 SettingsView(breakfast: breakfast, fillerFoods: fillerFoods)
                     .navigationTitle("Settings")
             }
@@ -215,8 +220,3 @@ struct FillerFoodInputSheet: View {
     }
 }
 
-#Preview {
-    ContentView()
-        .environment(HealthManager())
-        .modelContainer(for: [StandardBreakfast.self, FillerFood.self], inMemory: true)
-}

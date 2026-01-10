@@ -32,6 +32,9 @@ class HealthManager: NSObject, WCSessionDelegate {
     var currentWeight: Double?
     var weightTrend: Double?
     
+    // Full Weight History for Trend Tab
+    var weightHistory: [Date: Double] = [:]
+    
     var weightMissingToday: Bool = true
     var isAuthorized: Bool = false
     
@@ -156,6 +159,7 @@ class HealthManager: NSObject, WCSessionDelegate {
         await fetchActiveEnergy()
         await fetchNutrientsToday()
         await checkWeightToday()
+        await fetchWeightHistory()
         
         await MainActor.run {
             updateWidgetData()
@@ -390,6 +394,34 @@ class HealthManager: NSObject, WCSessionDelegate {
             }
         } catch {
             print("Error fetching BMR data: \(error)")
+        }
+    }
+    
+    // Fetch full history for the trend graph
+    private func fetchWeightHistory() async {
+        let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass)!
+        // Fetch all data (no start date limit)
+        let predicate = HKQuery.predicateForSamples(withStart: nil, end: Date(), options: .strictStartDate)
+        
+        do {
+            let samples = try await fetchSamples(for: weightType, predicate: predicate, limit: HKObjectQueryNoLimit, sortAscending: true)
+            
+            var history: [Date: Double] = [:]
+            let calendar = Calendar.current
+            
+            for sample in samples {
+                let date = calendar.startOfDay(for: sample.startDate)
+                let weight = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
+                // Duplicate handling: latest wins (iteration order is ascending start date)
+                history[date] = weight
+            }
+            
+            let finalHistory = history
+            await MainActor.run {
+                self.weightHistory = finalHistory
+            }
+        } catch {
+            print("Error fetching weight history: \(error)")
         }
     }
     
