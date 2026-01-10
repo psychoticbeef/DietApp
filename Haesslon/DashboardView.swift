@@ -1,3 +1,10 @@
+//
+//  DashboardView.swift
+//  Haesslon
+//
+//  Created by Daniel Arndt on 09.01.26.
+//
+
 import SwiftUI
 import HealthKit
 import SwiftData
@@ -22,6 +29,10 @@ struct DashboardView: View {
     // Settings needed for calculations
     @AppStorage("caloricDeficit") private var caloricDeficit: Double = 500.0
     @AppStorage("useActiveEnergyToday") private var useActiveEnergyToday: Bool = false
+    
+    // Auto Deficit Settings
+    @AppStorage("autoDeficitEnabled") private var autoDeficitEnabled: Bool = false
+    @AppStorage("isCurrentlyInDeficitMode") private var isCurrentlyInDeficitMode: Bool = false
     
     var body: some View {
         VStack(spacing: 20) {
@@ -83,7 +94,10 @@ struct DashboardView: View {
             if let bmr = healthManager.bmr {
                 let activeEnergy = useActiveEnergyToday ? healthManager.activeEnergyToday : healthManager.activeEnergyYesterday
                 let tdee = bmr + activeEnergy
-                let dailyGoal = tdee - caloricDeficit
+                
+                // Determine effective deficit
+                let effectiveDeficit = autoDeficitEnabled ? (isCurrentlyInDeficitMode ? caloricDeficit : 0) : caloricDeficit
+                let dailyGoal = tdee - effectiveDeficit
                 
                 let currentEaten = healthManager.dietaryEnergyToday
                 let projectedEaten = currentEaten + preview.kcal
@@ -124,6 +138,13 @@ struct DashboardView: View {
                             Text("\(energyLabel) remaining")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            
+                            if autoDeficitEnabled {
+                                Text(isCurrentlyInDeficitMode ? "Deficit Active" : "Maintenance Mode")
+                                    .font(.caption)
+                                    .foregroundStyle(isCurrentlyInDeficitMode ? .orange : .blue)
+                                    .padding(.top, 4)
+                            }
                         }
                     }
                     
@@ -265,6 +286,38 @@ struct DashboardView: View {
                     isCompact: isCompact
                 )
             }
+            
+            if let weight = healthManager.currentWeight {
+                Divider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Weight (14d Avg)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(String(format: "%.1f", weight))
+                                .font(.title3)
+                                .bold()
+                            
+                            Text(" kg")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            
+                            if let trend = healthManager.weightTrend {
+                                HStack(spacing: 2) {
+                                    Image(systemName: trend > 0 ? "arrow.up" : "arrow.down")
+                                    Text(String(format: "%.1f", abs(trend)))
+                                }
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundStyle(trend > 0 ? .red : .green)
+                            }
+                        }
+                    }
+                    Spacer()
+                }
+            }
         }
         .padding(isCompact ? 12 : 16)
         .background(Color(.secondarySystemBackground))
@@ -332,7 +385,10 @@ struct DashboardView: View {
         guard let bmr = healthManager.bmr else { return nil }
         let activeEnergy = useActiveEnergyToday ? healthManager.activeEnergyToday : healthManager.activeEnergyYesterday
         let tdee = bmr + activeEnergy
-        let dailyGoal = tdee - caloricDeficit
+        
+        let effectiveDeficit = autoDeficitEnabled ? (isCurrentlyInDeficitMode ? caloricDeficit : 0) : caloricDeficit
+        let dailyGoal = tdee - effectiveDeficit
+        
         return dailyGoal - healthManager.dietaryEnergyToday
     }
 }

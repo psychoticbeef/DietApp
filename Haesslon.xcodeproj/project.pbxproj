@@ -62,6 +62,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		030194D52F11C5AE0029A533 /* Exceptions for "Haesslon" folder in "Haesslon" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 035136492F10DCDE0021E92F /* Haesslon */;
+		};
 		035136CE2F10F2A80021E92F /* Exceptions for "HaesslonWidget" folder in "HaesslonWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -91,6 +98,7 @@
 		0351364C2F10DCDE0021E92F /* Haesslon */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				030194D52F11C5AE0029A533 /* Exceptions for "Haesslon" folder in "Haesslon" target */,
 				035137042F119F610021E92F /* Exceptions for "Haesslon" folder in "HaesslonWidgetExtension" target */,
 			);
 			path = Haesslon;
@@ -484,6 +492,7 @@
 				DEVELOPMENT_TEAM = Q9QK5E2S4V;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Haesslon/Info.plist;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "To calculate your daily calorie budget.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Haesslon needs write access to HealthKit to save your breakfast calories and macros to Apple Health.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -519,6 +528,7 @@
 				DEVELOPMENT_TEAM = Q9QK5E2S4V;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Haesslon/Info.plist;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "To calculate your daily calorie budget.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Haesslon needs write access to HealthKit to save your breakfast calories and macros to Apple Health.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

@@ -1,3 +1,10 @@
+//
+//  SettingsView.swift
+//  Haesslon
+//
+//  Created by Daniel Arndt on 09.01.26.
+//
+
 import SwiftUI
 import HealthKit
 import SwiftData
@@ -12,6 +19,11 @@ struct SettingsView: View {
     
     @AppStorage("caloricDeficit") private var caloricDeficit: Double = 500.0
     @AppStorage("useActiveEnergyToday") private var useActiveEnergyToday: Bool = false
+    
+    // Auto Deficit Settings
+    @AppStorage("autoDeficitEnabled") private var autoDeficitEnabled: Bool = false
+    @AppStorage("autoDeficitUpperBound") private var autoDeficitUpperBound: Double = 85.0
+    @AppStorage("autoDeficitLowerBound") private var autoDeficitLowerBound: Double = 80.0
     
     @FocusState private var focusedField: String?
     
@@ -31,7 +43,40 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .layoutPriority(1)
                 }
+                
+                Toggle("Auto Deficit", isOn: $autoDeficitEnabled)
+                
+                if autoDeficitEnabled {
+                    HStack {
+                        Text("Upper Bound (On)")
+                        Spacer()
+                        TextField("kg", value: $autoDeficitUpperBound, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .focused($focusedField, equals: "upperBound")
+                            .frame(width: 60)
+                        Text("kg")
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    HStack {
+                        Text("Lower Bound (Off)")
+                        Spacer()
+                        TextField("kg", value: $autoDeficitLowerBound, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .focused($focusedField, equals: "lowerBound")
+                            .frame(width: 60)
+                        Text("kg")
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Text("Deficit applies when weight ≥ Upper Bound. Turns off when weight ≤ Lower Bound.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            
             Section(header: Text("Calculation Method")) {
                 Toggle("Use Today's Active Energy", isOn: $useActiveEnergyToday)
             }
@@ -72,6 +117,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -168,6 +214,7 @@ struct StandardBreakfastDetailView: View {
                 macroField(label: "Salt", value: saltBinding, unit: "g", fieldId: "bk_salt")
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Configure Breakfast")
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -300,6 +347,7 @@ struct FillerFoodDetailView: View {
                 macroField(label: "Salt", value: saltBinding, unit: "g", fieldId: "ff_salt")
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle(food.name.isEmpty ? "New Food" : food.name)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
