@@ -190,10 +190,13 @@ struct HealthEvaluator {
     }
     
     static func evaluatePAL(value: Double) -> (LocalizedStringKey?, Color) {
-        if value < 1.4 { return ("Sedentary", .red) }
-        if value < 1.6 { return ("Low Active", .orange) }
-        if value < 1.9 { return ("Active", .green) }
-        return ("Very Active", .purple)
+        // Multipliers: 1.2, 1.375, 1.55, 1.725, 1.9
+        // Breakpoints calculated as midpoints between these targets
+        if value < 1.29 { return ("Sedentary", .red) }
+        if value < 1.46 { return ("Lightly Active", .orange) }
+        if value < 1.64 { return ("Moderately Active", .green) }
+        if value < 1.81 { return ("Very Active", .blue) }
+        return ("Extra Active", .purple)
     }
 }
 
