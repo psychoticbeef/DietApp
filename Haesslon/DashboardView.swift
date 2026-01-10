@@ -28,7 +28,6 @@ struct DashboardView: View {
     
     // Settings needed for calculations
     @AppStorage("caloricDeficit") private var caloricDeficit: Double = 500.0
-    @AppStorage("useActiveEnergyToday") private var useActiveEnergyToday: Bool = false
     
     // Auto Deficit Settings
     @AppStorage("autoDeficitEnabled") private var autoDeficitEnabled: Bool = false
@@ -100,7 +99,8 @@ struct DashboardView: View {
             }
             
             if let bmr = healthManager.bmr {
-                let activeEnergy = useActiveEnergyToday ? healthManager.activeEnergyToday : healthManager.activeEnergyYesterday
+                // Always use yesterday's active energy
+                let activeEnergy = healthManager.activeEnergyYesterday
                 let tdee = bmr + activeEnergy
                 
                 // Determine effective deficit
@@ -161,7 +161,7 @@ struct DashboardView: View {
                     HStack(spacing: 20) {
                         DetailStat(label: "BMR", value: Int(toDisplayEnergy(bmr)), unit: energyLabel)
                         DetailStat(
-                            label: useActiveEnergyToday ? "Active (Today)" : "Active (Yst)",
+                            label: "Active (Yst)",
                             value: Int(toDisplayEnergy(activeEnergy)),
                             unit: energyLabel
                         )
@@ -433,7 +433,8 @@ struct DashboardView: View {
     
     private func calculateRemaining() -> Double? {
         guard let bmr = healthManager.bmr else { return nil }
-        let activeEnergy = useActiveEnergyToday ? healthManager.activeEnergyToday : healthManager.activeEnergyYesterday
+        // Always use yesterday's active energy
+        let activeEnergy = healthManager.activeEnergyYesterday
         let tdee = bmr + activeEnergy
         
         let effectiveDeficit = autoDeficitEnabled ? (isCurrentlyInDeficitMode ? caloricDeficit : 0) : caloricDeficit

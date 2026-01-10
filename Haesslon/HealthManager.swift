@@ -224,7 +224,6 @@ class HealthManager: NSObject, WCSessionDelegate {
     func updateWidgetData() {
         let defaults = UserDefaults.standard
         let deficit = defaults.object(forKey: "caloricDeficit") as? Double ?? 500.0
-        let useActiveEnergyToday = defaults.bool(forKey: "useActiveEnergyToday")
         let autoDeficitEnabled = defaults.bool(forKey: "autoDeficitEnabled")
         let isInDeficitMode = defaults.bool(forKey: "isCurrentlyInDeficitMode")
         
@@ -232,7 +231,8 @@ class HealthManager: NSObject, WCSessionDelegate {
         
         guard let bmr = self.bmr else { return }
         
-        let activeEnergy = useActiveEnergyToday ? self.activeEnergyToday : self.activeEnergyYesterday
+        // Always use yesterday's active energy for calculation
+        let activeEnergy = self.activeEnergyYesterday
         let tdee = bmr + activeEnergy
         let dailyGoal = tdee - effectiveDeficit
         let remaining = dailyGoal - self.dietaryEnergyToday

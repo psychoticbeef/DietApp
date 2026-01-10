@@ -18,7 +18,6 @@ struct SettingsView: View {
     var fillerFoods: [FillerFood]
     
     @AppStorage("caloricDeficit") private var caloricDeficit: Double = 500.0
-    @AppStorage("useActiveEnergyToday") private var useActiveEnergyToday: Bool = false
     
     // Auto Deficit Settings
     @AppStorage("autoDeficitEnabled") private var autoDeficitEnabled: Bool = false
@@ -77,9 +76,6 @@ struct SettingsView: View {
                 }
             }
             
-            Section(header: Text("Calculation Method")) {
-                Toggle("Use Today's Active Energy", isOn: $useActiveEnergyToday)
-            }
             Section(header: Text("Standard Breakfast")) {
                 NavigationLink(destination: StandardBreakfastDetailView(breakfast: breakfast, healthManager: healthManager)) {
                     HStack {
@@ -115,6 +111,10 @@ struct SettingsView: View {
                     let newFood = FillerFood()
                     modelContext.insert(newFood)
                 }
+            }
+            
+            Section {
+                NavigationLink("About & Donation", destination: AboutView())
             }
         }
         .scrollDismissesKeyboard(.interactively)
