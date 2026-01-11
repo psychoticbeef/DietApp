@@ -12,8 +12,6 @@
 		035136CD2F10F2A80021E92F /* HaesslonWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 035136BC2F10F2A60021E92F /* HaesslonWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		035136D72F11012B0021E92F /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 035136D62F11012B0021E92F /* Localizable.xcstrings */; };
 		035136D82F11012B0021E92F /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 035136D62F11012B0021E92F /* Localizable.xcstrings */; };
-		035136DE2F1102910021E92F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0351367E2F10EBDF0021E92F /* WidgetKit.framework */; };
-		035136DF2F1102910021E92F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 035136802F10EBDF0021E92F /* SwiftUI.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,7 +55,6 @@
 		035136BC2F10F2A60021E92F /* HaesslonWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HaesslonWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		035136D22F10F3F20021E92F /* HaesslonWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HaesslonWidgetExtension.entitlements; sourceTree = "<group>"; };
 		035136D62F11012B0021E92F /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
-		035136DD2F1102910021E92F /* HaesslonWatchWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HaesslonWatchWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		035136F22F1104FC0021E92F /* HaesslonWatchWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HaesslonWatchWidgetExtension.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -76,16 +73,11 @@
 			);
 			target = 035136BB2F10F2A60021E92F /* HaesslonWidgetExtension */;
 		};
-		035136EC2F1102940021E92F /* Exceptions for "HaesslonWatchWidget" folder in "HaesslonWatchWidgetExtension" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 035136DC2F1102910021E92F /* HaesslonWatchWidgetExtension */;
-		};
 		035137042F119F610021E92F /* Exceptions for "Haesslon" folder in "HaesslonWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				AppConstants.swift,
+				DietLogic.swift,
 				HealthManager.swift,
 				LogBreakfastIntent.swift,
 				Models.swift,
@@ -112,14 +104,6 @@
 			path = HaesslonWidget;
 			sourceTree = "<group>";
 		};
-		035136E02F1102910021E92F /* HaesslonWatchWidget */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				035136EC2F1102940021E92F /* Exceptions for "HaesslonWatchWidget" folder in "HaesslonWatchWidgetExtension" target */,
-			);
-			path = HaesslonWatchWidget;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -139,15 +123,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		035136DA2F1102910021E92F /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				035136DF2F1102910021E92F /* SwiftUI.framework in Frameworks */,
-				035136DE2F1102910021E92F /* WidgetKit.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -158,7 +133,6 @@
 				035136D62F11012B0021E92F /* Localizable.xcstrings */,
 				0351364C2F10DCDE0021E92F /* Haesslon */,
 				035136BF2F10F2A60021E92F /* HaesslonWidget */,
-				035136E02F1102910021E92F /* HaesslonWatchWidget */,
 				0351367D2F10EBDF0021E92F /* Frameworks */,
 				0351364B2F10DCDE0021E92F /* Products */,
 				035136D22F10F3F20021E92F /* HaesslonWidgetExtension.entitlements */,
@@ -170,7 +144,6 @@
 			children = (
 				0351364A2F10DCDE0021E92F /* Haesslon.app */,
 				035136BC2F10F2A60021E92F /* HaesslonWidgetExtension.appex */,
-				035136DD2F1102910021E92F /* HaesslonWatchWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -234,28 +207,6 @@
 			productReference = 035136BC2F10F2A60021E92F /* HaesslonWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		035136DC2F1102910021E92F /* HaesslonWatchWidgetExtension */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 035136ED2F1102940021E92F /* Build configuration list for PBXNativeTarget "HaesslonWatchWidgetExtension" */;
-			buildPhases = (
-				035136D92F1102910021E92F /* Sources */,
-				035136DA2F1102910021E92F /* Frameworks */,
-				035136DB2F1102910021E92F /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				035136E02F1102910021E92F /* HaesslonWatchWidget */,
-			);
-			name = HaesslonWatchWidgetExtension;
-			packageProductDependencies = (
-			);
-			productName = HaesslonWatchWidgetExtension;
-			productReference = 035136DD2F1102910021E92F /* HaesslonWatchWidgetExtension.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -270,9 +221,6 @@
 						CreatedOnToolsVersion = 26.2;
 					};
 					035136BB2F10F2A60021E92F = {
-						CreatedOnToolsVersion = 26.2;
-					};
-					035136DC2F1102910021E92F = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
@@ -294,7 +242,6 @@
 			targets = (
 				035136492F10DCDE0021E92F /* Haesslon */,
 				035136BB2F10F2A60021E92F /* HaesslonWidgetExtension */,
-				035136DC2F1102910021E92F /* HaesslonWatchWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -316,13 +263,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		035136DB2F1102910021E92F /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -334,13 +274,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		035136B82F10F2A60021E92F /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		035136D92F1102910021E92F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -615,74 +548,6 @@
 			};
 			name = Release;
 		};
-		035136EE2F1102940021E92F /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
-				CODE_SIGN_ENTITLEMENTS = HaesslonWatchWidgetExtension.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = Q9QK5E2S4V;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = HaesslonWatchWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = HaesslonWatchWidget;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-					"@executable_path/../../../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = de.darndt.technologies.HaesslonWatchWidget;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 26.2;
-			};
-			name = Debug;
-		};
-		035136EF2F1102940021E92F /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
-				CODE_SIGN_ENTITLEMENTS = HaesslonWatchWidgetExtension.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = Q9QK5E2S4V;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = HaesslonWatchWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = HaesslonWatchWidget;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-					"@executable_path/../../../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = de.darndt.technologies.HaesslonWatchWidget;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 26.2;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -709,15 +574,6 @@
 			buildConfigurations = (
 				035136D02F10F2A80021E92F /* Debug */,
 				035136D12F10F2A80021E92F /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		035136ED2F1102940021E92F /* Build configuration list for PBXNativeTarget "HaesslonWatchWidgetExtension" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				035136EE2F1102940021E92F /* Debug */,
-				035136EF2F1102940021E92F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

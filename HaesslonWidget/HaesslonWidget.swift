@@ -1,21 +1,13 @@
-//
-//  HaesslonWidget.swift
-//  HaesslonWidget
-//
-//  Created by Daniel Arndt on 09.01.26.
-//
-
 import WidgetKit
 import SwiftUI
 import AppIntents
 
-// Renamed to avoid conflicts
 struct CaloriesProvider: TimelineProvider {
     func placeholder(in context: Context) -> CaloriesEntry {
         CaloriesEntry(
             date: Date(),
             remainingCalories: 1200,
-            consumedCalories: 0, // Placeholder
+            consumedCalories: 0,
             kcalProgress: 0.4,
             proteinProgress: 0.6,
             fiberProgress: 0.3,
@@ -27,7 +19,7 @@ struct CaloriesProvider: TimelineProvider {
         let entry = CaloriesEntry(
             date: Date(),
             remainingCalories: 1200,
-            consumedCalories: 800, // Example snapshot
+            consumedCalories: 800,
             kcalProgress: 0.4,
             proteinProgress: 0.6,
             fiberProgress: 0.3,
@@ -37,21 +29,15 @@ struct CaloriesProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<CaloriesEntry>) -> ()) {
-        // ⚠️ CHANGE THIS to your actual App Group ID
-        let appGroupID = "group.com.haesslon.shared"
-        let sharedDefaults = UserDefaults(suiteName: appGroupID)
+        let sharedDefaults = UserDefaults(suiteName: AppConstants.appGroupId)
         
-        let remaining = sharedDefaults?.double(forKey: "remainingCalories") ?? 0
-        let kcalProgress = sharedDefaults?.double(forKey: "kcalProgress") ?? 0
-        let proteinProgress = sharedDefaults?.double(forKey: "proteinProgress") ?? 0
-        let fiberProgress = sharedDefaults?.double(forKey: "fiberProgress") ?? 0
-        let weighedIn = sharedDefaults?.bool(forKey: "weighedInToday") ?? false
+        let remaining = sharedDefaults?.double(forKey: AppConstants.Keys.remainingCalories) ?? 0
+        let kcalProgress = sharedDefaults?.double(forKey: AppConstants.Keys.kcalProgress) ?? 0
+        let proteinProgress = sharedDefaults?.double(forKey: AppConstants.Keys.proteinProgress) ?? 0
+        let fiberProgress = sharedDefaults?.double(forKey: AppConstants.Keys.fiberProgress) ?? 0
+        let weighedIn = sharedDefaults?.bool(forKey: AppConstants.Keys.weighedInToday) ?? false
         
-        // Calculate consumed based on progress and remaining isn't perfectly reliable here
-        // because we don't save 'consumed' explicitly in HealthManager's widget update.
-        // However, we can infer it: if progress is near 0, consumed is near 0.
-        // Better yet: we should update HealthManager to save 'consumedCalories'.
-        // For now, let's trust that if kcalProgress is effectively 0, we haven't eaten.
+        // Infer consumption state from progress
         let consumed = (kcalProgress > 0.01) ? 100.0 : 0.0
         
         let currentDate = Date()
@@ -65,7 +51,6 @@ struct CaloriesProvider: TimelineProvider {
             weighedIn: weighedIn
         )
 
-        // Refresh every 30 minutes
         let refreshDate = Calendar.current.date(byAdding: .minute, value: 30, to: currentDate) ?? currentDate.addingTimeInterval(1800)
         let timeline = Timeline(entries: [entry], policy: .after(refreshDate))
         completion(timeline)
@@ -75,7 +60,7 @@ struct CaloriesProvider: TimelineProvider {
 struct CaloriesEntry: TimelineEntry {
     let date: Date
     let remainingCalories: Double
-    let consumedCalories: Double // Added to track if we should show button
+    let consumedCalories: Double
     let kcalProgress: Double
     let proteinProgress: Double
     let fiberProgress: Double
@@ -90,25 +75,23 @@ struct HaesslonWidgetEntryView : View {
         switch family {
         case .systemSmall:
             ZStack {
-                // Background Rings (Track)
+                // Background Rings
                 Group {
-                    RingShape(progress: 1.0, thickness: 12)
+                    RingShape(progress: 1.0)
                         .stroke(Color.gray.opacity(0.15), lineWidth: 12)
                         .frame(width: 120, height: 120)
-                    
-                    RingShape(progress: 1.0, thickness: 12)
+                    RingShape(progress: 1.0)
                         .stroke(Color.gray.opacity(0.15), lineWidth: 12)
                         .frame(width: 92, height: 92)
-                    
-                    RingShape(progress: 1.0, thickness: 12)
+                    RingShape(progress: 1.0)
                         .stroke(Color.gray.opacity(0.15), lineWidth: 12)
                         .frame(width: 64, height: 64)
                 }
                 
                 // Progress Rings
                 Group {
-                    // Outer: Calories (Red/Green based on remaining)
-                    RingShape(progress: entry.kcalProgress, thickness: 12)
+                    // Outer: Calories
+                    RingShape(progress: entry.kcalProgress)
                         .stroke(
                             entry.remainingCalories >= 0 ? Color.blue : Color.red,
                             style: StrokeStyle(lineWidth: 12, lineCap: .round)
@@ -116,14 +99,14 @@ struct HaesslonWidgetEntryView : View {
                         .frame(width: 120, height: 120)
                         .rotationEffect(.degrees(-90))
                     
-                    // Middle: Protein (Blue)
-                    RingShape(progress: entry.proteinProgress, thickness: 12)
+                    // Middle: Protein
+                    RingShape(progress: entry.proteinProgress)
                         .stroke(Color.purple, style: StrokeStyle(lineWidth: 12, lineCap: .round))
                         .frame(width: 92, height: 92)
                         .rotationEffect(.degrees(-90))
                     
-                    // Inner: Fiber (Green)
-                    RingShape(progress: entry.fiberProgress, thickness: 12)
+                    // Inner: Fiber
+                    RingShape(progress: entry.fiberProgress)
                         .stroke(Color.green, style: StrokeStyle(lineWidth: 12, lineCap: .round))
                         .frame(width: 64, height: 64)
                         .rotationEffect(.degrees(-90))
@@ -142,14 +125,12 @@ struct HaesslonWidgetEntryView : View {
                     }
                 }
                 
-                // Interactive Button Overlay
-                // Only show if consumed calories (represented by progress here for now) is zero
+                // Interactive Button Overlay (Only if not eaten yet)
                 if entry.consumedCalories == 0 {
                     VStack {
                         Spacer()
                         HStack {
                             Spacer()
-                            // 🟢 INTERACTIVE BUTTON HERE
                             Button(intent: LogBreakfastIntent()) {
                                 Image(systemName: "cup.and.saucer.fill")
                                     .font(.system(size: 10))
@@ -158,7 +139,7 @@ struct HaesslonWidgetEntryView : View {
                                     .background(Color.blue)
                                     .clipShape(Circle())
                             }
-                            .buttonStyle(.plain) // Required for widget buttons
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -168,7 +149,6 @@ struct HaesslonWidgetEntryView : View {
             }
             
         default:
-            // Fallback for larger sizes (could be expanded later)
             VStack {
                 Text("\(Int(entry.remainingCalories)) kcal left")
                 if entry.consumedCalories == 0 {
@@ -188,10 +168,8 @@ struct HaesslonWidgetEntryView : View {
     }
 }
 
-// Custom Shape for Rings to allow centering properly
 struct RingShape: Shape {
     var progress: Double
-    var thickness: CGFloat
     
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -219,4 +197,3 @@ struct HaesslonWidget: Widget {
         .supportedFamilies([.systemSmall])
     }
 }
-

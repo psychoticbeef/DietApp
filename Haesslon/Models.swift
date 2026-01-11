@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 @Model
-class StandardBreakfast {
+final class StandardBreakfast {
     var name: String = "Breakfast"
     var totalKcal: Double = 0
     var totalFat: Double = 0
@@ -21,7 +21,7 @@ class StandardBreakfast {
 }
 
 @Model
-class FillerFood {
+final class FillerFood {
     var name: String = ""
     var kcalPer100g: Double = 0
     var fatPer100g: Double = 0

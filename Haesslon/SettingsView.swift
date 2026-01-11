@@ -1,10 +1,3 @@
-//
-//  SettingsView.swift
-//  Haesslon
-//
-//  Created by Daniel Arndt on 09.01.26.
-//
-
 import SwiftUI
 import HealthKit
 import SwiftData
@@ -17,12 +10,12 @@ struct SettingsView: View {
     @Bindable var breakfast: StandardBreakfast
     var fillerFoods: [FillerFood]
     
-    @AppStorage("caloricDeficit") private var caloricDeficit: Double = 500.0
+    @AppStorage(AppConstants.Keys.caloricDeficit) private var caloricDeficit: Double = 500.0
     
-    // Auto Deficit Settings
-    @AppStorage("autoDeficitEnabled") private var autoDeficitEnabled: Bool = false
-    @AppStorage("autoDeficitUpperBound") private var autoDeficitUpperBound: Double = 85.0
-    @AppStorage("autoDeficitLowerBound") private var autoDeficitLowerBound: Double = 80.0
+    // Auto Deficit Settings using Constants
+    @AppStorage(AppConstants.Keys.autoDeficitEnabled) private var autoDeficitEnabled: Bool = false
+    @AppStorage(AppConstants.Keys.autoDeficitUpperBound) private var autoDeficitUpperBound: Double = 85.0
+    @AppStorage(AppConstants.Keys.autoDeficitLowerBound) private var autoDeficitLowerBound: Double = 80.0
     
     @FocusState private var focusedField: String?
     
@@ -165,7 +158,6 @@ struct StandardBreakfastDetailView: View {
     var healthManager: HealthManager
     @FocusState private var focusedField: String?
     
-    // Define field order for navigation
     private let fieldOrder = [
         "name", "bk_kcal", "bk_fat", "bk_satfat",
         "bk_carbs", "bk_sugar", "bk_fib", "bk_prot", "bk_salt"
@@ -236,7 +228,6 @@ struct StandardBreakfastDetailView: View {
         }
     }
     
-    // Navigation Helpers
     private func moveFocus(forward: Bool) {
         guard let current = focusedField,
               let index = fieldOrder.firstIndex(of: current) else { return }
@@ -298,7 +289,6 @@ struct FillerFoodDetailView: View {
     var healthManager: HealthManager
     @FocusState private var focusedField: String?
     
-    // Define field order for navigation
     private let fieldOrder = [
         "name", "ff_kcal", "ff_fat", "ff_satfat",
         "ff_carbs", "ff_sugar", "ff_fib", "ff_prot", "ff_salt"
@@ -369,7 +359,6 @@ struct FillerFoodDetailView: View {
         }
     }
     
-    // Navigation Helpers
     private func moveFocus(forward: Bool) {
         guard let current = focusedField,
               let index = fieldOrder.firstIndex(of: current) else { return }
