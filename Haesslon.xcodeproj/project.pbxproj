@@ -426,6 +426,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Haesslon/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Haesslon needs access to the camera to scan nutrition labels.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "To calculate your daily calorie budget.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Haesslon needs write access to HealthKit to save your breakfast calories and macros to Apple Health.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -462,6 +463,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Haesslon/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Haesslon needs access to the camera to scan nutrition labels.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "To calculate your daily calorie budget.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Haesslon needs write access to HealthKit to save your breakfast calories and macros to Apple Health.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
