@@ -31,14 +31,44 @@ struct CaloriesProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<CaloriesEntry>) -> ()) {
         let sharedDefaults = UserDefaults(suiteName: AppConstants.appGroupId)
         
-        let remaining = sharedDefaults?.double(forKey: AppConstants.Keys.remainingCalories) ?? 0
-        let kcalProgress = sharedDefaults?.double(forKey: AppConstants.Keys.kcalProgress) ?? 0
-        let proteinProgress = sharedDefaults?.double(forKey: AppConstants.Keys.proteinProgress) ?? 0
-        let fiberProgress = sharedDefaults?.double(forKey: AppConstants.Keys.fiberProgress) ?? 0
-        let weighedIn = sharedDefaults?.bool(forKey: AppConstants.Keys.weighedInToday) ?? false
+        // 1. Fetch raw data
+        let storedRemaining = sharedDefaults?.double(forKey: AppConstants.Keys.remainingCalories) ?? 0
+        let storedDailyGoal = sharedDefaults?.double(forKey: AppConstants.Keys.dailyGoal) ?? 2000 // Fallback
+        let storedKcalProgress = sharedDefaults?.double(forKey: AppConstants.Keys.kcalProgress) ?? 0
+        let storedProteinProgress = sharedDefaults?.double(forKey: AppConstants.Keys.proteinProgress) ?? 0
+        let storedFiberProgress = sharedDefaults?.double(forKey: AppConstants.Keys.fiberProgress) ?? 0
+        let storedWeighedIn = sharedDefaults?.bool(forKey: AppConstants.Keys.weighedInToday) ?? false
+        let lastUpdatedDate = sharedDefaults?.object(forKey: AppConstants.Keys.lastUpdatedDate) as? Date ?? Date.distantPast
         
-        // Infer consumption state from progress
-        let consumed = (kcalProgress > 0.01) ? 100.0 : 0.0
+        // 2. Check if data is stale (from yesterday or older)
+        let isToday = Calendar.current.isDateInToday(lastUpdatedDate)
+        
+        // 3. Determine actual values to display
+        let remaining: Double
+        let kcalProgress: Double
+        let proteinProgress: Double
+        let fiberProgress: Double
+        let weighedIn: Bool
+        let consumed: Double
+
+        if isToday {
+            // Data is fresh, use stored values
+            remaining = storedRemaining
+            kcalProgress = storedKcalProgress
+            proteinProgress = storedProteinProgress
+            fiberProgress = storedFiberProgress
+            weighedIn = storedWeighedIn
+            consumed = (storedKcalProgress > 0.01) ? 100.0 : 0.0
+        } else {
+            // Data is stale (new day), reset visuals
+            // On a new day, Remaining = Daily Goal (since 0 eaten)
+            remaining = storedDailyGoal
+            kcalProgress = 0
+            proteinProgress = 0
+            fiberProgress = 0
+            weighedIn = false // Reset weigh-in status for the new day
+            consumed = 0
+        }
         
         let currentDate = Date()
         let entry = CaloriesEntry(
@@ -51,8 +81,14 @@ struct CaloriesProvider: TimelineProvider {
             weighedIn: weighedIn
         )
 
-        let refreshDate = Calendar.current.date(byAdding: .minute, value: 30, to: currentDate) ?? currentDate.addingTimeInterval(1800)
-        let timeline = Timeline(entries: [entry], policy: .after(refreshDate))
+        // Refresh at the start of the next day to ensure the UI resets at midnight
+        let calendar = Calendar.current
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: currentDate))!
+        
+        // Also refresh periodically (e.g., every 30 mins)
+        let nextUpdate = min(tomorrow, currentDate.addingTimeInterval(1800))
+        
+        let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
         completion(timeline)
     }
 }
@@ -116,6 +152,7 @@ struct HaesslonWidgetEntryView : View {
                 VStack(spacing: 0) {
                     Text("\(Int(entry.remainingCalories))")
                         .font(.system(size: 20, weight: .heavy, design: .rounded))
+                        .contentTransition(.numericText())
                     
                     if !entry.weighedIn {
                         Image(systemName: "exclamationmark.triangle.fill")

@@ -67,6 +67,9 @@ class HealthManager: NSObject, WCSessionDelegate {
             return
         }
         
+        // FIX: Start observing immediately in init.
+        // This ensures queries run during background background delivery
+        // even if the UI hasn't loaded yet.
         if isAuthorized {
             startObserving()
             fetchData()
@@ -176,15 +179,11 @@ class HealthManager: NSObject, WCSessionDelegate {
     func updateWidgetData() {
         let defaults = UserDefaults.standard
         let deficit = defaults.double(forKey: AppConstants.Keys.caloricDeficit)
-        // If deficit is 0 but key doesn't exist, default to 500. Otherwise use value.
         let safeDeficit = (deficit == 0 && defaults.object(forKey: AppConstants.Keys.caloricDeficit) == nil) ? 500.0 : deficit
         
         let autoDeficitEnabled = defaults.bool(forKey: AppConstants.Keys.autoDeficitEnabled)
-        
-        // Corrected Key usage here
         let isInDeficitMode = defaults.bool(forKey: AppConstants.Keys.isCurrentlyInDeficitMode)
         
-        // Use Shared Logic
         let budget = DietLogic.calculateBudget(
             bmr: self.bmr,
             activeEnergyYesterday: self.activeEnergyYesterday,
@@ -202,6 +201,8 @@ class HealthManager: NSObject, WCSessionDelegate {
         
         let sharedDefaults = UserDefaults(suiteName: AppConstants.appGroupId)
         sharedDefaults?.set(budget.remaining, forKey: AppConstants.Keys.remainingCalories)
+        // FIX: Store the daily goal so the widget can default to this on a new day
+        sharedDefaults?.set(budget.dailyGoal, forKey: AppConstants.Keys.dailyGoal)
         sharedDefaults?.set(kcalProgress, forKey: AppConstants.Keys.kcalProgress)
         sharedDefaults?.set(proteinProgress, forKey: AppConstants.Keys.proteinProgress)
         sharedDefaults?.set(fiberProgress, forKey: AppConstants.Keys.fiberProgress)

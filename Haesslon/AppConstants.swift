@@ -7,6 +7,7 @@ struct AppConstants {
     struct Keys {
         // Widget Data
         static let remainingCalories = "remainingCalories"
+        static let dailyGoal = "dailyGoal"
         static let kcalProgress = "kcalProgress"
         static let proteinProgress = "proteinProgress"
         static let fiberProgress = "fiberProgress"
@@ -18,8 +19,6 @@ struct AppConstants {
         // Settings / AppStorage
         static let caloricDeficit = "caloricDeficit"
         static let autoDeficitEnabled = "autoDeficitEnabled"
-        
-        // These were missing or named differently causing the errors
         static let autoDeficitUpperBound = "autoDeficitUpperBound"
         static let autoDeficitLowerBound = "autoDeficitLowerBound"
         static let isCurrentlyInDeficitMode = "isCurrentlyInDeficitMode"
