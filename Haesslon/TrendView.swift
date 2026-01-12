@@ -61,7 +61,7 @@ struct TrendView: View {
                             LineMark(
                                 x: .value("Date", point.date),
                                 y: .value("Trend", point.trendWeight),
-                                series: .value("Type", "History")
+                                series: .value("Type", String(localized: "History"))
                             )
                             .foregroundStyle(Color.blue)
                             .interpolationMethod(.catmullRom)
@@ -72,7 +72,7 @@ struct TrendView: View {
                             LineMark(
                                 x: .value("Date", point.date),
                                 y: .value("Trend", point.trendWeight),
-                                series: .value("Type", "Projection")
+                                series: .value("Type", String(localized: "Projection"))
                             )
                             .foregroundStyle(Color.orange)
                             .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 5]))
@@ -170,7 +170,7 @@ struct TrendView: View {
     
     // MARK: - Computed Properties
     
-    private var currentViewLabel: String {
+    private var currentViewLabel: LocalizedStringKey {
         let days = Int(visibleDays)
         let totalHistory = trendData.count
         
@@ -232,7 +232,7 @@ struct TrendView: View {
     
     // MARK: - Helpers
     
-    private func statView(label: String, value: String, unit: String, color: Color) -> some View {
+    private func statView(label: LocalizedStringKey, value: String, unit: LocalizedStringKey, color: Color) -> some View {
         VStack(alignment: .leading) {
             Text(label)
                 .font(.caption)
