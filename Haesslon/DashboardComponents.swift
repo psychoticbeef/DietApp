@@ -56,6 +56,7 @@ struct MetricCard: View {
     let category: LocalizedStringKey?
     let color: Color
     var trend: Double? = nil
+    var invertTrendColor: Bool = false // If true, Up = Green (e.g. VO2Max). If false, Up = Red (e.g. Weight)
     
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -88,13 +89,28 @@ struct MetricCard: View {
                     if category != nil {
                         Spacer()
                     }
+                    
+                    // Determine Neutrality based on display precision (approx < 0.1)
+                    let isNeutral = abs(trend) < 0.05
+                    let iconName = isNeutral ? "arrow.right" : (trend > 0 ? "arrow.up" : "arrow.down")
+                    
+                    // Logic:
+                    // Neutral: Secondary Color
+                    // Positive Trend: Green (if inverted) or Red (default)
+                    // Negative Trend: Red (if inverted) or Green (default)
+                    let trendColor: Color = isNeutral ? .secondary : (
+                        trend > 0
+                        ? (invertTrendColor ? .green : .red)
+                        : (invertTrendColor ? .red : .green)
+                    )
+                    
                     HStack(spacing: 2) {
-                        Image(systemName: trend > 0 ? "arrow.up" : "arrow.down")
+                        Image(systemName: iconName)
                         Text(String(format: "%.1f", abs(trend)))
                     }
                     .font(.caption2)
                     .fontWeight(.bold)
-                    .foregroundStyle(trend > 0 ? .red : .green)
+                    .foregroundStyle(trendColor)
                 }
             }
         }
@@ -199,4 +215,3 @@ struct HealthEvaluator {
         return ("Extra Active", .purple)
     }
 }
-

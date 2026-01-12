@@ -219,26 +219,78 @@ struct DashboardView: View {
                 VStack(spacing: 8) {
                     HStack { Text("Body Composition (7d Avg)").font(.caption).foregroundStyle(.secondary); Spacer() }
                     LazyVGrid(columns: columns, spacing: 12) {
-                        MetricCard(label: "Weight", value: String(format: "%.1f", weight), unit: "kg", category: "", color: .primary, trend: healthManager.weightTrend)
+                        
+                        // CLEVER: Instead of repeating "Overweight" or "Normal", show the
+                        // "Normal" weight range for the user's height (BMI 18.5 - 25).
+                        // This gives the user a concrete target range.
+                        let weightRangeLabel: String? = {
+                            guard let h = healthManager.height else { return nil }
+                            let m = h / 100.0
+                            let lower = 18.5 * m * m
+                            let upper = 25.0 * m * m
+                            return "\(Int(ceil(lower)))-\(Int(floor(upper)))kg"
+                        }()
+                        
+                        MetricCard(
+                            label: "Weight",
+                            value: String(format: "%.1f", weight),
+                            unit: "kg",
+                            category: weightRangeLabel.map { LocalizedStringKey($0) },
+                            color: .primary, // Neutral color for the info pill
+                            trend: healthManager.weightTrend,
+                            invertTrendColor: false // Losing weight is green
+                        )
                         
                         if let height = healthManager.height {
                             let (cat, col) = HealthEvaluator.evaluateBMI(weightKg: weight, heightCm: height)
-                            MetricCard(label: "BMI", value: String(format: "%.1f", weight / pow(height/100, 2)), unit: "", category: cat, color: col)
+                            MetricCard(
+                                label: "BMI",
+                                value: String(format: "%.1f", weight / pow(height/100, 2)),
+                                unit: "",
+                                category: cat,
+                                color: col,
+                                trend: healthManager.bmiTrend,
+                                invertTrendColor: false // Lower BMI is green
+                            )
                         }
                         
                         if let bf = healthManager.bodyFat, let age = healthManager.age {
                             let (cat, col) = HealthEvaluator.evaluateBodyFat(percent: bf, age: age, sex: healthManager.biologicalSex)
-                            MetricCard(label: "Body Fat", value: String(format: "%.1f", bf * 100), unit: "%", category: cat, color: col)
+                            MetricCard(
+                                label: "Body Fat",
+                                value: String(format: "%.1f", bf * 100),
+                                unit: "%",
+                                category: cat,
+                                color: col,
+                                trend: healthManager.bodyFatTrend != nil ? healthManager.bodyFatTrend! * 100 : nil,
+                                invertTrendColor: false // Lower body fat is green
+                            )
                         }
                         
                         if let vo2 = healthManager.vo2Max, let age = healthManager.age {
                             let (cat, col) = HealthEvaluator.evaluateVO2Max(value: vo2, age: age, sex: healthManager.biologicalSex)
-                            MetricCard(label: "VO2 Max", value: String(format: "%.1f", vo2), unit: "ml/kg", category: cat, color: col)
+                            MetricCard(
+                                label: "VO2 Max",
+                                value: String(format: "%.1f", vo2),
+                                unit: "ml/kg",
+                                category: cat,
+                                color: col,
+                                trend: healthManager.vo2MaxTrend,
+                                invertTrendColor: true // Higher VO2 max is green
+                            )
                         }
                         
                         if let pal = healthManager.physicalActivityLevel {
                             let (cat, col) = HealthEvaluator.evaluatePAL(value: pal)
-                            MetricCard(label: "PA Level", value: String(format: "%.2f", pal), unit: "", category: cat, color: col)
+                            MetricCard(
+                                label: "PA Level",
+                                value: String(format: "%.2f", pal),
+                                unit: "",
+                                category: cat,
+                                color: col,
+                                trend: healthManager.physicalActivityLevelTrend,
+                                invertTrendColor: true // Higher activity is green
+                            )
                         }
                     }
                 }
