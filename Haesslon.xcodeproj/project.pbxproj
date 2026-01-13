@@ -81,6 +81,7 @@
 				HealthManager.swift,
 				LogBreakfastIntent.swift,
 				Models.swift,
+				TrendCalculations.swift,
 			);
 			target = 035136BB2F10F2A60021E92F /* HaesslonWidgetExtension */;
 		};

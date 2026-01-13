@@ -13,7 +13,7 @@ class HealthManager: NSObject, WCSessionDelegate {
     private(set) var bmr: Double?
     private(set) var activeEnergyYesterday: Double = 0
     private(set) var activeEnergyToday: Double = 0
-    private(set) var activeEnergy7DayAvg: Double = 0
+    private(set) var activeEnergyTrend: Double = 0 // EWMA
     
     private(set) var dietaryEnergyToday: Double = 0
     private(set) var dietaryProteinToday: Double = 0
@@ -23,15 +23,15 @@ class HealthManager: NSObject, WCSessionDelegate {
     private(set) var dietarySugarToday: Double = 0
     private(set) var dietarySodiumToday: Double = 0
     
-    private(set) var currentWeight: Double? // 7-Day Avg
-    private(set) var weightTrend: Double?
+    private(set) var currentWeight: Double? // EWMA
+    private(set) var weightTrend: Double? // Delta vs 7 days ago
     private(set) var bmiTrend: Double?
     
-    private(set) var bodyFat: Double?
-    private(set) var bodyFatTrend: Double?
+    private(set) var bodyFat: Double? // EWMA
+    private(set) var bodyFatTrend: Double? // Delta
     
-    private(set) var vo2Max: Double?
-    private(set) var vo2MaxTrend: Double?
+    private(set) var vo2Max: Double? // EWMA
+    private(set) var vo2MaxTrend: Double? // Delta
     
     private(set) var height: Double?
     private(set) var age: Int?
@@ -50,18 +50,19 @@ class HealthManager: NSObject, WCSessionDelegate {
     private var refreshDebounceTask: Task<Void, Never>?
     
     // Derived Metric: Physical Activity Level (PAL)
+    // Uses EWMA of Active Energy divided by BMR
     var physicalActivityLevel: Double? {
-        guard let bmr = bmr, bmr > 0, activeEnergy7DayAvg > 0 else { return nil }
-        return (bmr + activeEnergy7DayAvg) / bmr
+        guard let bmr = bmr, bmr > 0, activeEnergyTrend > 0 else { return nil }
+        return (bmr + activeEnergyTrend) / bmr
     }
     
-    // Trend for PAL needs active energy trend
-    private(set) var activeEnergy7DayTrend: Double?
+    // Trend for PAL (Delta)
+    // Calculated derived from Active Energy Trend Delta
+    private(set) var activeEnergyTrendDelta: Double?
     
     var physicalActivityLevelTrend: Double? {
-        guard let bmr = bmr, bmr > 0, let activeTrend = activeEnergy7DayTrend else { return nil }
-        // The delta in PAL is simply the delta in active energy / bmr
-        return activeTrend / bmr
+        guard let bmr = bmr, bmr > 0, let activeDelta = activeEnergyTrendDelta else { return nil }
+        return activeDelta / bmr
     }
     
     override init() {
@@ -81,9 +82,6 @@ class HealthManager: NSObject, WCSessionDelegate {
             return
         }
         
-        // FIX: Start observing immediately in init.
-        // This ensures queries run during background background delivery
-        // even if the UI hasn't loaded yet.
         if isAuthorized {
             startObserving()
             fetchData()
@@ -177,11 +175,11 @@ class HealthManager: NSObject, WCSessionDelegate {
     }
     
     private func refreshData() async {
-        await fetchBMRData()
-        await fetchActiveEnergy()
+        // Dependencies
+        await fetchHistoryData() // Fetches Weight, BodyFat, VO2Max history & calcs EWMA
+        await fetchActiveEnergy() // Fetches Activity history & calcs EWMA
         await fetchNutrientsToday()
         await checkWeightToday()
-        await fetchWeightHistory()
         
         await MainActor.run {
             updateWidgetData()
@@ -198,6 +196,9 @@ class HealthManager: NSObject, WCSessionDelegate {
         let autoDeficitEnabled = defaults.bool(forKey: AppConstants.Keys.autoDeficitEnabled)
         let isInDeficitMode = defaults.bool(forKey: AppConstants.Keys.isCurrentlyInDeficitMode)
         
+        // Ensure we have a weight for calculation (fallback to 70 if completely missing)
+        let weightForCalc = self.currentWeight ?? 70.0
+        
         let budget = DietLogic.calculateBudget(
             bmr: self.bmr,
             activeEnergyYesterday: self.activeEnergyYesterday,
@@ -207,7 +208,7 @@ class HealthManager: NSObject, WCSessionDelegate {
             isCurrentlyInDeficitMode: isInDeficitMode
         )
         
-        let proteinTarget = (self.currentWeight ?? 70) * 0.8
+        let proteinTarget = weightForCalc * 0.8
         let proteinProgress = min(self.dietaryProteinToday / proteinTarget, 1.0)
         let fiberTarget = 30.0
         let fiberProgress = min(self.dietaryFiberToday / fiberTarget, 1.0)
@@ -215,7 +216,6 @@ class HealthManager: NSObject, WCSessionDelegate {
         
         let sharedDefaults = UserDefaults(suiteName: AppConstants.appGroupId)
         sharedDefaults?.set(budget.remaining, forKey: AppConstants.Keys.remainingCalories)
-        // FIX: Store the daily goal so the widget can default to this on a new day
         sharedDefaults?.set(budget.dailyGoal, forKey: AppConstants.Keys.dailyGoal)
         sharedDefaults?.set(kcalProgress, forKey: AppConstants.Keys.kcalProgress)
         sharedDefaults?.set(proteinProgress, forKey: AppConstants.Keys.proteinProgress)
@@ -271,10 +271,11 @@ class HealthManager: NSObject, WCSessionDelegate {
         }
     }
     
-    // MARK: - Fetch Implementations
+    // MARK: - Fetch Implementations (Unified History & EWMA)
     
-    private func fetchBMRData() async {
+    private func fetchHistoryData() async {
         do {
+            // 1. Basic Bio Data (Height, Age, Sex)
             let birthDateComponents = try healthStore.dateOfBirthComponents()
             let biologicalSexObj = try healthStore.biologicalSex()
             let biologicalSex = biologicalSexObj.biologicalSex
@@ -287,116 +288,65 @@ class HealthManager: NSObject, WCSessionDelegate {
             let heightSamples = try await fetchSamples(for: heightType, limit: 1)
             let heightCm = (heightSamples.first?.quantity.doubleValue(for: .meter()) ?? 0) * 100
             
-            // Weight (14-Day to calculate 7d trend)
-            let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass)!
+            // 2. Fetch History for Trend Calculation
+            // UPDATED: Fetch from Year 2000 to ensure Trend View has full history.
+            // EWMA calculation will simply converge over this longer period, which is fine/better.
             let calendar = Calendar.current
-            let startOfToday = calendar.startOfDay(for: Date())
-            let startOfRecent = calendar.date(byAdding: .day, value: -6, to: startOfToday)! // Last 7 days
-            let startOfPrevious = calendar.date(byAdding: .day, value: -13, to: startOfToday)! // 7 days before that
+            let endDate = Date()
+            let startDate = calendar.date(from: DateComponents(year: 2000, month: 1, day: 1))!
+            let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
             
-            let predicate = HKQuery.predicateForSamples(withStart: startOfPrevious, end: Date(), options: .strictStartDate)
-            let recentWeights = try await fetchSamples(for: weightType, predicate: predicate)
+            // Fetch raw samples
+            async let sWeight = fetchSamples(for: .quantityType(forIdentifier: .bodyMass)!, predicate: predicate, limit: HKObjectQueryNoLimit, sortAscending: true)
+            async let sBF = fetchSamples(for: .quantityType(forIdentifier: .bodyFatPercentage)!, predicate: predicate, limit: HKObjectQueryNoLimit, sortAscending: true)
+            async let sVO2 = fetchSamples(for: .quantityType(forIdentifier: .vo2Max)!, predicate: predicate, limit: HKObjectQueryNoLimit, sortAscending: true)
             
-            // Body Fat (14-Day)
-            let bodyFatType = HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage)!
-            let bfSamples = try await fetchSamples(for: bodyFatType, predicate: predicate)
-
-            // VO2 Max (14-Day)
-            let vo2Type = HKQuantityType.quantityType(forIdentifier: .vo2Max)!
-            let vo2Samples = try await fetchSamples(for: vo2Type, predicate: predicate)
+            let (weightSamples, bfSamples, vo2Samples) = try await (sWeight, sBF, sVO2)
             
-            let result = await Task.detached { () -> (Double?, Double?, Double?, Double?, Double?, Double?, Double?, Double?) in
-                // Weight Logic
-                var recentSum: Double = 0; var recentCount: Int = 0
-                var previousSum: Double = 0; var previousCount: Int = 0
+            // Process on background thread
+            let result = await Task.detached {
+                let calendar = Calendar.current
                 
-                for sample in recentWeights {
-                    let weightVal = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
-                    if sample.startDate >= startOfRecent {
-                        recentSum += weightVal
-                        recentCount += 1
-                    } else {
-                        previousSum += weightVal
-                        previousCount += 1
+                // Helper to map samples to [Date: Double] (Day -> Value)
+                func processSamples(_ samples: [HKQuantitySample], unit: HKUnit) -> [Date: Double] {
+                    var map: [Date: [Double]] = [:]
+                    for s in samples {
+                        let day = calendar.startOfDay(for: s.startDate)
+                        let val = s.quantity.doubleValue(for: unit)
+                        map[day, default: []].append(val)
                     }
+                    return map.mapValues { $0.reduce(0, +) / Double($0.count) }
                 }
                 
-                var displayWeight: Double?
-                var weightTrend: Double?
-                var weightForBMR: Double = 0
+                // Process Weight
+                let weightMap = processSamples(weightSamples, unit: .gramUnit(with: .kilo))
+                let (wEWMA, wTrend) = TrendEngine.calculateMetricTrend(from: weightMap, ignoreToday: false)
                 
-                if recentCount > 0 {
-                    displayWeight = recentSum / Double(recentCount)
-                    weightForBMR = displayWeight!
-                }
-                
-                if recentCount > 0 && previousCount > 0 {
-                    let currentAvg = recentSum / Double(recentCount)
-                    let previousAvg = previousSum / Double(previousCount)
-                    weightTrend = currentAvg - previousAvg
-                }
-                
-                if weightForBMR == 0 && previousCount > 0 {
-                    weightForBMR = previousSum / Double(previousCount)
-                }
-                
-                // BMI Trend (Derived)
-                var bmiTrend: Double?
-                if let wt = weightTrend, heightCm > 0 {
+                // Calculate BMI Trend
+                var bmiDelta: Double? = nil
+                if let wt = wTrend, heightCm > 0 {
                     let hM = heightCm / 100.0
-                    bmiTrend = wt / (hM * hM)
+                    bmiDelta = wt / (hM * hM)
                 }
                 
-                // Helper for Averages
-                func calculateAvgAndTrend(samples: [HKQuantitySample], unit: HKUnit) -> (Double?, Double?) {
-                    var rSum: Double = 0; var rCount: Int = 0
-                    var pSum: Double = 0; var pCount: Int = 0
-                    
-                    for sample in samples {
-                        let val = sample.quantity.doubleValue(for: unit)
-                        if sample.startDate >= startOfRecent {
-                            rSum += val; rCount += 1
-                        } else {
-                            pSum += val; pCount += 1
-                        }
-                    }
-                    
-                    let curr = rCount > 0 ? rSum / Double(rCount) : nil
-                    let prev = pCount > 0 ? pSum / Double(pCount) : nil
-                    let tr = (curr != nil && prev != nil) ? curr! - prev! : nil
-                    return (curr, tr)
-                }
+                // Process Body Fat
+                let bfMap = processSamples(bfSamples, unit: .percent())
+                let (bfEWMA, bfTrend) = TrendEngine.calculateMetricTrend(from: bfMap, ignoreToday: false)
                 
-                let (avgBF, trBF) = calculateAvgAndTrend(samples: bfSamples, unit: .percent())
-                
-                // Construct VO2 Unit safely
+                // Process VO2 Max
                 let ml = HKUnit.literUnit(with: .milli)
                 let kg = HKUnit.gramUnit(with: .kilo)
                 let min = HKUnit.minute()
                 let vo2Unit = ml.unitDivided(by: kg.unitMultiplied(by: min))
+                let vo2Map = processSamples(vo2Samples, unit: vo2Unit)
+                let (vo2EWMA, vo2Trend) = TrendEngine.calculateMetricTrend(from: vo2Map, ignoreToday: false)
                 
-                let (avgVo2, trVo2) = calculateAvgAndTrend(samples: vo2Samples, unit: vo2Unit)
-                
-                return (displayWeight, weightTrend, weightForBMR, avgBF, trBF, avgVo2, trVo2, bmiTrend)
+                return (weightMap, wEWMA, wTrend, bmiDelta, bfEWMA, bfTrend, vo2EWMA, vo2Trend)
             }.value
             
-            let displayWeight = result.0
-            let trend = result.1
-            var weightForBMR = result.2 ?? 0
-            let avgBodyFat = result.3
-            let trendBodyFat = result.4
-            let avgVo2 = result.5
-            let trendVo2 = result.6
-            let trendBMI = result.7
-            
-            if weightForBMR == 0 {
-                let allWeights = try await fetchSamples(for: weightType, limit: 1, sortAscending: false)
-                if let newest = allWeights.first {
-                    weightForBMR = newest.quantity.doubleValue(for: .gramUnit(with: .kilo))
-                }
-            }
-            
-            guard weightForBMR > 0 && heightCm > 0 else { return }
+            // BMR Calculation (Mifflin-St Jeor)
+            // Uses EWMA Weight for stability
+            let weightForBMR = result.1 ?? 70.0 // fallback
             
             let s = (10 * weightForBMR) + (6.25 * heightCm) - (5 * Double(age))
             let finalBMR: Double = {
@@ -408,104 +358,70 @@ class HealthManager: NSObject, WCSessionDelegate {
             }()
             
             await MainActor.run {
-                self.bmr = finalBMR
-                self.currentWeight = displayWeight
-                self.weightTrend = trend
+                self.weightHistory = result.0
+                self.currentWeight = result.1
+                self.weightTrend = result.2
+                self.bmiTrend = result.3
+                self.bodyFat = result.4
+                self.bodyFatTrend = result.5
+                self.vo2Max = result.6
+                self.vo2MaxTrend = result.7
+                
                 self.height = heightCm
                 self.age = age
                 self.biologicalSex = biologicalSex
-                self.bodyFat = avgBodyFat
-                self.bodyFatTrend = trendBodyFat
-                self.vo2Max = avgVo2
-                self.vo2MaxTrend = trendVo2
-                self.bmiTrend = trendBMI
+                self.bmr = finalBMR
             }
         } catch {
-            print("Error fetching BMR data: \(error)")
-        }
-    }
-    
-    private func fetchWeightHistory() async {
-        let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass)!
-        let limitDate = Calendar.current.date(from: DateComponents(year: 2000, month: 1, day: 1))
-        let predicate = HKQuery.predicateForSamples(withStart: limitDate, end: Date(), options: .strictStartDate)
-        
-        do {
-            let samples = try await fetchSamples(for: weightType, predicate: predicate, limit: HKObjectQueryNoLimit, sortAscending: true)
-            
-            let history = await Task.detached {
-                var dict: [Date: Double] = [:]
-                let calendar = Calendar.current
-                for sample in samples {
-                    let date = calendar.startOfDay(for: sample.startDate)
-                    let weight = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
-                    dict[date] = weight
-                }
-                return dict
-            }.value
-            
-            await MainActor.run {
-                self.weightHistory = history
-            }
-        } catch {
-            print("Error fetching weight history: \(error)")
+            print("Error fetching history data: \(error)")
         }
     }
     
     private func fetchActiveEnergy() async {
         let type = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!
         let calendar = Calendar.current
-        let now = Date()
-        let startOfDay = calendar.startOfDay(for: now)
-        let startOfYesterday = calendar.date(byAdding: .day, value: -1, to: startOfDay)!
         
-        // Ranges for Today, Yesterday
-        let predicateYesterday = HKQuery.predicateForSamples(withStart: startOfYesterday, end: startOfDay, options: .strictStartDate)
-        let predicateToday = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
+        // Fetch last 60 days to warm up EWMA (Keep limited to preserve performance)
+        let endDate = Date()
+        let startDate = calendar.date(byAdding: .day, value: -60, to: endDate)!
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
         
-        // Ranges for 14-Day Trend Calculation
-        // [Day -7 ... Day -1] vs [Day -14 ... Day -8]
-        let startOf7Days = calendar.date(byAdding: .day, value: -7, to: startOfDay)!
-        let startOf14Days = calendar.date(byAdding: .day, value: -14, to: startOfDay)!
-        
-        let predicate14Days = HKQuery.predicateForSamples(withStart: startOf14Days, end: startOfDay, options: .strictStartDate)
-        
-        async let samplesYesterday = (try? await fetchSamples(for: type, predicate: predicateYesterday)) ?? []
-        async let samplesToday = (try? await fetchSamples(for: type, predicate: predicateToday)) ?? []
-        async let samples14Days = (try? await fetchSamples(for: type, predicate: predicate14Days)) ?? []
-        
-        let (sY, sT, s14) = await (samplesYesterday, samplesToday, samples14Days)
-        
-        let result = await Task.detached {
-            let y = sY.reduce(0) { $0 + $1.quantity.doubleValue(for: .kilocalorie()) }
-            let t = sT.reduce(0) { $0 + $1.quantity.doubleValue(for: .kilocalorie()) }
+        do {
+            let samples = try await fetchSamples(for: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortAscending: true)
             
-            // Calculate 7-Day Avg and Previous 7-Day Avg
-            var rSum: Double = 0 // Recent (last 7 days)
-            var pSum: Double = 0 // Previous (7 days before that)
-            
-            for sample in s14 {
-                let val = sample.quantity.doubleValue(for: .kilocalorie())
-                // Samples between -7 and Now
-                if sample.startDate >= startOf7Days {
-                    rSum += val
-                } else {
-                    pSum += val
+            let result = await Task.detached {
+                let calendar = Calendar.current
+                
+                // 1. Sum by Day
+                var dailySum: [Date: Double] = [:]
+                for s in samples {
+                    let day = calendar.startOfDay(for: s.startDate)
+                    let val = s.quantity.doubleValue(for: .kilocalorie())
+                    dailySum[day, default: 0] += val
                 }
+                
+                // 2. Extract Specific Days for Dashboard (Raw values)
+                let startToday = calendar.startOfDay(for: Date())
+                let startYesterday = calendar.date(byAdding: .day, value: -1, to: startToday)!
+                
+                let todayVal = dailySum[startToday] ?? 0
+                let yesterdayVal = dailySum[startYesterday] ?? 0
+                
+                // 3. Calculate EWMA Trend
+                // IMPORTANT: ignoreToday = true, because today's activity is incomplete and would drag the trend down artificially.
+                let (ewma, delta) = TrendEngine.calculateMetricTrend(from: dailySum, ignoreToday: true)
+                
+                return (todayVal, yesterdayVal, ewma, delta)
+            }.value
+            
+            await MainActor.run {
+                self.activeEnergyToday = result.0
+                self.activeEnergyYesterday = result.1
+                self.activeEnergyTrend = result.2 ?? 0
+                self.activeEnergyTrendDelta = result.3
             }
-            
-            let avgCurrent = rSum / 7.0
-            let avgPrev = pSum / 7.0
-            let trend = avgCurrent - avgPrev
-            
-            return (y, t, avgCurrent, trend)
-        }.value
-        
-        await MainActor.run {
-            self.activeEnergyYesterday = result.0
-            self.activeEnergyToday = result.1
-            self.activeEnergy7DayAvg = result.2
-            self.activeEnergy7DayTrend = result.3
+        } catch {
+            print("Error fetching active energy: \(error)")
         }
     }
     
@@ -559,7 +475,7 @@ class HealthManager: NSObject, WCSessionDelegate {
             self.weightMissingToday = samples?.isEmpty ?? true
             let defaults = UserDefaults.standard
             
-            // Corrected Key Usage
+            // Auto Deficit Check
             if defaults.bool(forKey: AppConstants.Keys.autoDeficitEnabled), let weight = todaysWeight {
                 let upper = defaults.double(forKey: AppConstants.Keys.autoDeficitUpperBound)
                 let lower = defaults.double(forKey: AppConstants.Keys.autoDeficitLowerBound)

@@ -58,54 +58,7 @@ enum TrendEngine: Sendable {
         }
         
         // Pre-fill weights with interpolation
-        var filledWeights: [Date: Double] = [:]
-        
-        var i = 0
-        while i < allDays.count {
-            let day = allDays[i]
-            
-            if let w = weightHistory[day] {
-                filledWeights[day] = w
-                i += 1
-            } else {
-                // Gap detected. Find next known weight.
-                var j = i + 1
-                var nextKnownIndex: Int? = nil
-                while j < allDays.count {
-                    if weightHistory[allDays[j]] != nil {
-                        nextKnownIndex = j
-                        break
-                    }
-                    j += 1
-                }
-                
-                if let nextIndex = nextKnownIndex, 
-                   i > 0,
-                   let startWeight = filledWeights[allDays[i-1]], 
-                   let endWeight = weightHistory[allDays[nextIndex]] {
-                    
-                    // Interpolate between (i-1) and nextIndex
-                    let totalSteps = Double(nextIndex - (i - 1))
-                    let weightDiff = endWeight - startWeight
-                    let stepSize = weightDiff / totalSteps
-                    
-                    for k in 0..<(nextIndex - i) {
-                        let offset = Double(k + 1)
-                        let interpolatedDate = allDays[i + k]
-                        let interpolatedWeight = startWeight + (stepSize * offset)
-                        filledWeights[interpolatedDate] = interpolatedWeight
-                    }
-                    i = nextIndex // Jump to the known weight
-                } else {
-                    // No future data (trailing gap up to today).
-                    // Carry forward the last weight to maintain the line
-                    if i > 0, let lastW = filledWeights[allDays[i-1]] {
-                        filledWeights[day] = lastW
-                    }
-                    i += 1
-                }
-            }
-        }
+        let filledWeights = fillGaps(in: weightHistory, for: allDays)
         
         // 3. EWMA Calculation
         var previousTrend: Double? = nil
@@ -189,5 +142,130 @@ enum TrendEngine: Sendable {
             weeklyChange: delta,
             dailyCaloricImbalance: imbalance
         )
+    }
+    
+    // MARK: - Generic Metric Calculation
+    
+    /// Calculates the current EWMA value and the delta compared to 7 days ago.
+    /// - Parameters:
+    ///   - history: Dictionary of Date -> Value
+    ///   - ignoreToday: If true, the calculation stops at yesterday (useful for Active Energy/PAL).
+    /// - Returns: (currentEWMA, changeOver7Days)
+    nonisolated static func calculateMetricTrend(from history: [Date: Double], ignoreToday: Bool) -> (current: Double?, change: Double?) {
+        guard !history.isEmpty else { return (nil, nil) }
+        
+        let smoothingFactorK: Double = 0.1
+        let calendar = Calendar.current
+        
+        // 1. Sort and Filter Dates
+        var sortedDates = history.keys.sorted()
+        
+        // If ignoring today, remove it from consideration for the "Latest" value
+        if ignoreToday {
+            let today = calendar.startOfDay(for: Date())
+            sortedDates = sortedDates.filter { $0 < today }
+        }
+        
+        guard let startDate = sortedDates.first, let endDate = sortedDates.last else { return (nil, nil) }
+        
+        // 2. Generate Date Range
+        var allDays: [Date] = []
+        var d = startDate
+        while d <= endDate {
+            allDays.append(d)
+            if let next = calendar.date(byAdding: .day, value: 1, to: d) {
+                d = next
+            } else {
+                break
+            }
+        }
+        
+        // 3. Fill Gaps
+        let filledValues = fillGaps(in: history, for: allDays)
+        
+        // 4. Calculate EWMA Series
+        var trends: [Double] = []
+        var previousTrend: Double? = nil
+        
+        for day in allDays {
+            guard let val = filledValues[day] else {
+                trends.append(previousTrend ?? 0) // Should not happen due to fillGaps
+                continue
+            }
+            
+            let trend: Double
+            if let prev = previousTrend {
+                trend = prev + smoothingFactorK * (val - prev)
+            } else {
+                trend = val
+            }
+            
+            trends.append(trend)
+            previousTrend = trend
+        }
+        
+        guard let current = trends.last else { return (nil, nil) }
+        
+        // 5. Calculate Change (vs 7 days ago)
+        var change: Double? = nil
+        if trends.count > 7 {
+            let old = trends[trends.count - 1 - 7]
+            change = current - old
+        }
+        
+        return (current, change)
+    }
+    
+    // Helper to fill gaps with interpolation or carry-forward
+    // Explicitly nonisolated to prevent MainActor inference
+    nonisolated private static func fillGaps(in history: [Date: Double], for allDays: [Date]) -> [Date: Double] {
+        var filled: [Date: Double] = [:]
+        
+        var i = 0
+        while i < allDays.count {
+            let day = allDays[i]
+            
+            if let val = history[day] {
+                filled[day] = val
+                i += 1
+            } else {
+                // Find next known
+                var j = i + 1
+                var nextKnownIndex: Int? = nil
+                while j < allDays.count {
+                    if history[allDays[j]] != nil {
+                        nextKnownIndex = j
+                        break
+                    }
+                    j += 1
+                }
+                
+                if let nextIndex = nextKnownIndex,
+                   i > 0,
+                   let startVal = filled[allDays[i-1]],
+                   let endVal = history[allDays[nextIndex]] {
+                    
+                    // Interpolate
+                    let totalSteps = Double(nextIndex - (i - 1))
+                    let diff = endVal - startVal
+                    let stepSize = diff / totalSteps
+                    
+                    for k in 0..<(nextIndex - i) {
+                        let offset = Double(k + 1)
+                        let interpDate = allDays[i + k]
+                        let interpVal = startVal + (stepSize * offset)
+                        filled[interpDate] = interpVal
+                    }
+                    i = nextIndex
+                } else {
+                    // Carry forward if no future data
+                    if i > 0, let lastVal = filled[allDays[i-1]] {
+                        filled[day] = lastVal
+                    }
+                    i += 1
+                }
+            }
+        }
+        return filled
     }
 }
